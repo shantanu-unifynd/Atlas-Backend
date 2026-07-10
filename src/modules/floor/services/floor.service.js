@@ -63,8 +63,21 @@ function getFloorById(buildingId, floorId) {
   return floor;
 }
 
+function getFloorByIdOnly(floorId) {
+  const floor = floors.find((f) => f.id === floorId);
+
+  if (!floor) {
+    const error = new Error("Floor not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return floor;
+}
+
 module.exports = {
   createFloor,
   getFloorsByBuildingId,
   getFloorById,
+  getFloorByIdOnly,
 };

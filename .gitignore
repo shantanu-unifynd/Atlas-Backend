@@ -25,3 +25,6 @@ dist/
 # Temporary
 tmp/
 temp/
+
+# Uploaded files (local dev storage only)
+uploads/

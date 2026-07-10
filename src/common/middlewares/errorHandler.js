@@ -1,7 +1,8 @@
+const multer = require("multer");
 const { errorResponse } = require("../utils/apiResponse");
 
 function errorHandler(err, req, res, next) {
-  const statusCode = err.statusCode || 500;
+  const statusCode = err instanceof multer.MulterError ? 400 : err.statusCode || 500;
   const message = err.message || "Something went wrong";
 
   return errorResponse(res, {
