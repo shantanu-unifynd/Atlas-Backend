@@ -1,5 +1,5 @@
 const blueprintService = require("../services/blueprint.service");
-const { successResponse } = require("../../../common/utils/apiResponse");
+const { successResponse } = require("../../../../common/utils/apiResponse");
 
 function createBlueprint(req, res, next) {
   try {

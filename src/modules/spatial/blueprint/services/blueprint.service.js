@@ -1,7 +1,7 @@
 const crypto = require("crypto");
 const Blueprint = require("../models/blueprint.model");
-const floorService = require("../../floor/services/floor.service");
-const assetService = require("../../asset/services/asset.service");
+const floorService = require("../../../floor/services/floor.service");
+const assetService = require("../../../asset/services/asset.service");
 
 const blueprints = [];
 
@@ -65,7 +65,20 @@ function getBlueprintByFloorId(floorId) {
   return blueprint;
 }
 
+function getBlueprintById(blueprintId) {
+  const blueprint = blueprints.find((b) => b.id === blueprintId);
+
+  if (!blueprint) {
+    const error = new Error("Blueprint not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return blueprint;
+}
+
 module.exports = {
   createBlueprint,
   getBlueprintByFloorId,
+  getBlueprintById,
 };
