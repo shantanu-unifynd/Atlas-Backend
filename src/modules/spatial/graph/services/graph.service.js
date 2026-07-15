@@ -4,8 +4,8 @@ const blueprintService = require("../../blueprint/services/blueprint.service");
 
 const graphs = [];
 
-function createGraph(blueprintId) {
-  blueprintService.getBlueprintById(blueprintId);
+async function createGraph(blueprintId) {
+  await blueprintService.getBlueprintById(blueprintId);
 
   const existing = graphs.find((g) => g.blueprintId === blueprintId);
 
@@ -34,8 +34,8 @@ function createGraph(blueprintId) {
   return graph;
 }
 
-function getGraphByBlueprintId(blueprintId) {
-  blueprintService.getBlueprintById(blueprintId);
+async function getGraphByBlueprintId(blueprintId) {
+  await blueprintService.getBlueprintById(blueprintId);
 
   const graph = graphs.find((g) => g.blueprintId === blueprintId);
 

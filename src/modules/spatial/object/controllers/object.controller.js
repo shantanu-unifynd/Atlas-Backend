@@ -1,9 +1,9 @@
 const objectService = require("../services/object.service");
 const { successResponse } = require("../../../../common/utils/apiResponse");
 
-function createObject(req, res, next) {
+async function createObject(req, res, next) {
   try {
-    const object = objectService.createObject(
+    const object = await objectService.createObject(
       req.params.blueprintId,
       req.body
     );
@@ -17,9 +17,9 @@ function createObject(req, res, next) {
   }
 }
 
-function getObjectsByBlueprint(req, res, next) {
+async function getObjectsByBlueprint(req, res, next) {
   try {
-    const objects = objectService.getObjectsByBlueprintId(
+    const objects = await objectService.getObjectsByBlueprintId(
       req.params.blueprintId
     );
     return successResponse(res, {

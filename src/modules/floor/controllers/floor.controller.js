@@ -1,9 +1,9 @@
 const floorService = require("../services/floor.service");
 const { successResponse } = require("../../../common/utils/apiResponse");
 
-function createFloor(req, res, next) {
+async function createFloor(req, res, next) {
   try {
-    const floor = floorService.createFloor(req.params.buildingId, req.body);
+    const floor = await floorService.createFloor(req.params.buildingId, req.body);
     return successResponse(res, {
       statusCode: 201,
       message: "Floor created successfully",
@@ -14,9 +14,9 @@ function createFloor(req, res, next) {
   }
 }
 
-function getFloors(req, res, next) {
+async function getFloors(req, res, next) {
   try {
-    const floors = floorService.getFloorsByBuildingId(req.params.buildingId);
+    const floors = await floorService.getFloorsByBuildingId(req.params.buildingId);
     return successResponse(res, {
       statusCode: 200,
       message: "Floors fetched successfully",
@@ -27,9 +27,9 @@ function getFloors(req, res, next) {
   }
 }
 
-function getFloorById(req, res, next) {
+async function getFloorById(req, res, next) {
   try {
-    const floor = floorService.getFloorById(
+    const floor = await floorService.getFloorById(
       req.params.buildingId,
       req.params.floorId
     );

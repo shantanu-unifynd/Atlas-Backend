@@ -1,9 +1,9 @@
 const buildingService = require("../services/building.service");
 const { successResponse } = require("../../../common/utils/apiResponse");
 
-function createBuilding(req, res, next) {
+async function createBuilding(req, res, next) {
   try {
-    const building = buildingService.createBuilding(req.body);
+    const building = await buildingService.createBuilding(req.body);
     return successResponse(res, {
       statusCode: 201,
       message: "Building created successfully",
@@ -14,9 +14,9 @@ function createBuilding(req, res, next) {
   }
 }
 
-function getBuildings(req, res, next) {
+async function getBuildings(req, res, next) {
   try {
-    const buildings = buildingService.getAllBuildings();
+    const buildings = await buildingService.getAllBuildings();
     return successResponse(res, {
       statusCode: 200,
       message: "Buildings fetched successfully",
@@ -27,9 +27,9 @@ function getBuildings(req, res, next) {
   }
 }
 
-function getBuildingById(req, res, next) {
+async function getBuildingById(req, res, next) {
   try {
-    const building = buildingService.getBuildingById(req.params.id);
+    const building = await buildingService.getBuildingById(req.params.id);
     return successResponse(res, {
       statusCode: 200,
       message: "Building fetched successfully",

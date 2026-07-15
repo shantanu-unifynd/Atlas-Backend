@@ -1,7 +1,6 @@
 const crypto = require("crypto");
 const Building = require("../models/building.model");
-
-const buildings = [];
+const buildingRepository = require("../../../repositories/building/building.repository");
 
 function validateBuildingInput(data) {
   const errors = [];
@@ -14,7 +13,19 @@ function validateBuildingInput(data) {
   return errors;
 }
 
-function createBuilding(data) {
+function toBuilding(record) {
+  return new Building({
+    id: record.id,
+    name: record.name,
+    address: record.address || undefined,
+    city: record.city,
+    country: record.country,
+    timezone: record.timezone,
+    createdAt: record.createdAt,
+  });
+}
+
+async function createBuilding(data) {
   const errors = validateBuildingInput(data);
 
   if (errors.length > 0) {
@@ -23,35 +34,34 @@ function createBuilding(data) {
     throw error;
   }
 
-  const building = new Building({
-    id: crypto.randomUUID(),
+  const record = await buildingRepository.create({
+    code: crypto.randomUUID(),
     name: data.name,
-    address: data.address,
+    address: data.address || "",
     city: data.city,
     country: data.country,
     timezone: data.timezone,
-    createdAt: new Date().toISOString(),
   });
 
-  buildings.push(building);
-
-  return building;
+  return toBuilding(record);
 }
 
-function getAllBuildings() {
-  return buildings;
+async function getAllBuildings() {
+  const records = await buildingRepository.findAll();
+
+  return records.map(toBuilding);
 }
 
-function getBuildingById(id) {
-  const building = buildings.find((b) => b.id === id);
+async function getBuildingById(id) {
+  const record = await buildingRepository.findById(id);
 
-  if (!building) {
+  if (!record) {
     const error = new Error("Building not found");
     error.statusCode = 404;
     throw error;
   }
 
-  return building;
+  return toBuilding(record);
 }
 
 module.exports = {

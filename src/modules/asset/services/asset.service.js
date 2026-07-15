@@ -1,11 +1,33 @@
-const crypto = require("crypto");
 const Asset = require("../models/asset.model");
-const floorService = require("../../floor/services/floor.service");
+const assetRepository = require("../../../repositories/asset/asset.repository");
+const floorRepository = require("../../../repositories/floor/floor.repository");
 
-const assets = [];
+function toAsset(record) {
+  return new Asset({
+    id: record.id,
+    floorId: record.floorId,
+    originalName: record.originalFilename,
+    mimeType: record.mimeType,
+    fileSize: record.fileSize,
+    uploadedAt: record.uploadedAt,
+    type: record.type,
+  });
+}
 
-function createAsset(floorId, file) {
-  floorService.getFloorByIdOnly(floorId);
+async function ensureFloorExists(floorId) {
+  const floor = await floorRepository.findById(floorId);
+
+  if (!floor) {
+    const error = new Error("Floor not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return floor;
+}
+
+async function createAsset(floorId, file) {
+  await ensureFloorExists(floorId);
 
   if (!file) {
     const error = new Error("file is required");
@@ -13,31 +35,29 @@ function createAsset(floorId, file) {
     throw error;
   }
 
-  const asset = new Asset({
-    id: crypto.randomUUID(),
+  const record = await assetRepository.create({
     floorId,
-    originalName: file.originalname,
+    type: "blueprint",
+    filename: file.filename,
+    originalFilename: file.originalname,
     mimeType: file.mimetype,
     fileSize: file.size,
-    uploadedAt: new Date().toISOString(),
-    type: "blueprint",
+    objectKey: file.filename,
   });
 
-  assets.push(asset);
-
-  return asset;
+  return toAsset(record);
 }
 
-function getAssetById(assetId) {
-  const asset = assets.find((a) => a.id === assetId);
+async function getAssetById(assetId) {
+  const record = await assetRepository.findById(assetId);
 
-  if (!asset) {
+  if (!record) {
     const error = new Error("Asset not found");
     error.statusCode = 404;
     throw error;
   }
 
-  return asset;
+  return toAsset(record);
 }
 
 module.exports = {

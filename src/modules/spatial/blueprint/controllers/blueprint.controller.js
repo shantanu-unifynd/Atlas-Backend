@@ -1,9 +1,9 @@
 const blueprintService = require("../services/blueprint.service");
 const { successResponse } = require("../../../../common/utils/apiResponse");
 
-function createBlueprint(req, res, next) {
+async function createBlueprint(req, res, next) {
   try {
-    const blueprint = blueprintService.createBlueprint(
+    const blueprint = await blueprintService.createBlueprint(
       req.params.floorId,
       req.body
     );
@@ -17,9 +17,9 @@ function createBlueprint(req, res, next) {
   }
 }
 
-function getBlueprint(req, res, next) {
+async function getBlueprint(req, res, next) {
   try {
-    const blueprint = blueprintService.getBlueprintByFloorId(
+    const blueprint = await blueprintService.getBlueprintByFloorId(
       req.params.floorId
     );
     return successResponse(res, {

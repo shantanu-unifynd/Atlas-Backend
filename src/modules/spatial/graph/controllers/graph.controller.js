@@ -1,9 +1,9 @@
 const graphService = require("../services/graph.service");
 const { successResponse } = require("../../../../common/utils/apiResponse");
 
-function createGraph(req, res, next) {
+async function createGraph(req, res, next) {
   try {
-    const graph = graphService.createGraph(req.params.blueprintId);
+    const graph = await graphService.createGraph(req.params.blueprintId);
     return successResponse(res, {
       statusCode: 201,
       message: "Navigation Graph created successfully",
@@ -14,9 +14,9 @@ function createGraph(req, res, next) {
   }
 }
 
-function getGraph(req, res, next) {
+async function getGraph(req, res, next) {
   try {
-    const graph = graphService.getGraphByBlueprintId(req.params.blueprintId);
+    const graph = await graphService.getGraphByBlueprintId(req.params.blueprintId);
     return successResponse(res, {
       statusCode: 200,
       message: "Navigation Graph fetched successfully",

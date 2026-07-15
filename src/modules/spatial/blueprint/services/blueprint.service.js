@@ -1,12 +1,55 @@
-const crypto = require("crypto");
+const { Prisma } = require("@prisma/client");
 const Blueprint = require("../models/blueprint.model");
-const floorService = require("../../../floor/services/floor.service");
-const assetService = require("../../../asset/services/asset.service");
+const blueprintRepository = require("../../../../repositories/blueprint/blueprint.repository");
+const floorRepository = require("../../../../repositories/floor/floor.repository");
+const assetRepository = require("../../../../repositories/asset/asset.repository");
 
-const blueprints = [];
+function toBlueprint(record) {
+  return new Blueprint({
+    id: record.id,
+    floorId: record.floorId,
+    assetId: record.assetId,
+    status: record.status,
+    dimensions: { width: record.width, height: record.height },
+    calibration: {
+      scale: record.scale,
+      rotation: record.rotation,
+      origin: { x: record.originX, y: record.originY },
+    },
+    coordinateSystem: { type: "local" },
+    layers: [],
+    metadata: record.metadata,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  });
+}
 
-function createBlueprint(floorId, data) {
-  floorService.getFloorByIdOnly(floorId);
+async function ensureFloorExists(floorId) {
+  const floor = await floorRepository.findById(floorId);
+
+  if (!floor) {
+    const error = new Error("Floor not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return floor;
+}
+
+async function ensureAssetExists(assetId) {
+  const asset = await assetRepository.findById(assetId);
+
+  if (!asset) {
+    const error = new Error("Asset not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return asset;
+}
+
+async function createBlueprint(floorId, data) {
+  await ensureFloorExists(floorId);
 
   if (!data.assetId) {
     const error = new Error("assetId is required");
@@ -14,7 +57,7 @@ function createBlueprint(floorId, data) {
     throw error;
   }
 
-  const asset = assetService.getAssetById(data.assetId);
+  const asset = await ensureAssetExists(data.assetId);
 
   if (asset.floorId !== floorId) {
     const error = new Error("Asset does not belong to this floor");
@@ -22,7 +65,7 @@ function createBlueprint(floorId, data) {
     throw error;
   }
 
-  const existing = blueprints.find((b) => b.floorId === floorId);
+  const existing = await blueprintRepository.findByFloorId(floorId);
 
   if (existing) {
     const error = new Error("Floor already has a blueprint");
@@ -30,51 +73,48 @@ function createBlueprint(floorId, data) {
     throw error;
   }
 
-  const now = new Date().toISOString();
+  try {
+    const record = await blueprintRepository.create({
+      floorId,
+      assetId: data.assetId,
+    });
 
-  const blueprint = new Blueprint({
-    id: crypto.randomUUID(),
-    floorId,
-    assetId: data.assetId,
-    status: "pending",
-    dimensions: { width: null, height: null },
-    calibration: { scale: null, rotation: 0, origin: { x: 0, y: 0 } },
-    coordinateSystem: { type: "local" },
-    layers: [],
-    metadata: {},
-    createdAt: now,
-    updatedAt: now,
-  });
+    return toBlueprint(record);
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const conflict = new Error("Floor already has a blueprint");
+      conflict.statusCode = 409;
+      throw conflict;
+    }
 
-  blueprints.push(blueprint);
-
-  return blueprint;
+    throw error;
+  }
 }
 
-function getBlueprintByFloorId(floorId) {
-  floorService.getFloorByIdOnly(floorId);
+async function getBlueprintByFloorId(floorId) {
+  await ensureFloorExists(floorId);
 
-  const blueprint = blueprints.find((b) => b.floorId === floorId);
+  const record = await blueprintRepository.findByFloorId(floorId);
 
-  if (!blueprint) {
+  if (!record) {
     const error = new Error("Blueprint not found");
     error.statusCode = 404;
     throw error;
   }
 
-  return blueprint;
+  return toBlueprint(record);
 }
 
-function getBlueprintById(blueprintId) {
-  const blueprint = blueprints.find((b) => b.id === blueprintId);
+async function getBlueprintById(blueprintId) {
+  const record = await blueprintRepository.findById(blueprintId);
 
-  if (!blueprint) {
+  if (!record) {
     const error = new Error("Blueprint not found");
     error.statusCode = 404;
     throw error;
   }
 
-  return blueprint;
+  return toBlueprint(record);
 }
 
 module.exports = {

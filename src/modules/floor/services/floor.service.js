@@ -1,8 +1,7 @@
-const crypto = require("crypto");
+const { Prisma } = require("@prisma/client");
 const Floor = require("../models/floor.model");
-const buildingService = require("../../building/services/building.service");
-
-const floors = [];
+const floorRepository = require("../../../repositories/floor/floor.repository");
+const buildingRepository = require("../../../repositories/building/building.repository");
 
 function validateFloorInput(data) {
   const errors = [];
@@ -15,8 +14,32 @@ function validateFloorInput(data) {
   return errors;
 }
 
-function createFloor(buildingId, data) {
-  buildingService.getBuildingById(buildingId);
+function toFloor(record) {
+  return new Floor({
+    id: record.id,
+    buildingId: record.buildingId,
+    name: record.name,
+    level: record.level,
+    blueprint: null,
+    status: record.status,
+    createdAt: record.createdAt,
+  });
+}
+
+async function ensureBuildingExists(buildingId) {
+  const building = await buildingRepository.findById(buildingId);
+
+  if (!building) {
+    const error = new Error("Building not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return building;
+}
+
+async function createFloor(buildingId, data) {
+  await ensureBuildingExists(buildingId);
 
   const errors = validateFloorInput(data);
 
@@ -26,53 +49,57 @@ function createFloor(buildingId, data) {
     throw error;
   }
 
-  const floor = new Floor({
-    id: crypto.randomUUID(),
-    buildingId,
-    name: data.name,
-    level: data.level,
-    blueprint: null,
-    status: "draft",
-    createdAt: new Date().toISOString(),
-  });
+  try {
+    const record = await floorRepository.create({
+      buildingId,
+      name: data.name,
+      level: data.level,
+    });
 
-  floors.push(floor);
+    return toFloor(record);
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const conflict = new Error("A floor with this level already exists for this building");
+      conflict.statusCode = 409;
+      throw conflict;
+    }
 
-  return floor;
+    throw error;
+  }
 }
 
-function getFloorsByBuildingId(buildingId) {
-  buildingService.getBuildingById(buildingId);
+async function getFloorsByBuildingId(buildingId) {
+  await ensureBuildingExists(buildingId);
 
-  return floors.filter((floor) => floor.buildingId === buildingId);
+  const records = await floorRepository.findAllByBuildingId(buildingId);
+
+  return records.map(toFloor);
 }
 
-function getFloorById(buildingId, floorId) {
-  buildingService.getBuildingById(buildingId);
+async function getFloorById(buildingId, floorId) {
+  await ensureBuildingExists(buildingId);
 
-  const floor = floors.find(
-    (f) => f.buildingId === buildingId && f.id === floorId
-  );
+  const record = await floorRepository.findById(floorId);
 
-  if (!floor) {
+  if (!record || record.buildingId !== buildingId) {
     const error = new Error("Floor not found");
     error.statusCode = 404;
     throw error;
   }
 
-  return floor;
+  return toFloor(record);
 }
 
-function getFloorByIdOnly(floorId) {
-  const floor = floors.find((f) => f.id === floorId);
+async function getFloorByIdOnly(floorId) {
+  const record = await floorRepository.findById(floorId);
 
-  if (!floor) {
+  if (!record) {
     const error = new Error("Floor not found");
     error.statusCode = 404;
     throw error;
   }
 
-  return floor;
+  return toFloor(record);
 }
 
 module.exports = {

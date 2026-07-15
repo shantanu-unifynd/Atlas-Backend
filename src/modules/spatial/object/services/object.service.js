@@ -107,8 +107,8 @@ function validateObjectInput(data) {
   return errors;
 }
 
-function createObject(blueprintId, data) {
-  blueprintService.getBlueprintById(blueprintId);
+async function createObject(blueprintId, data) {
+  await blueprintService.getBlueprintById(blueprintId);
 
   const errors = validateObjectInput(data);
 
@@ -140,8 +140,8 @@ function createObject(blueprintId, data) {
   return object;
 }
 
-function getObjectsByBlueprintId(blueprintId) {
-  blueprintService.getBlueprintById(blueprintId);
+async function getObjectsByBlueprintId(blueprintId) {
+  await blueprintService.getBlueprintById(blueprintId);
 
   return objects.filter((object) => object.blueprintId === blueprintId);
 }
