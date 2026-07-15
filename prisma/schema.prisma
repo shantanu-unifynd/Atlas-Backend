@@ -118,7 +118,171 @@ model Blueprint {
   floor Floor @relation(fields: [floorId], references: [id], onDelete: Cascade)
   asset Asset @relation(fields: [assetId], references: [id], onDelete: Restrict)
 
+  spatialObjects  SpatialObject[]
+  navigationGraph NavigationGraph?
+
   @@index([assetId])
   @@index([status])
   @@map("blueprints")
+}
+
+enum SpatialObjectCategory {
+  ARCHITECTURE
+  NAVIGATION
+  ACCESSIBILITY
+  EMERGENCY
+  ANNOTATION
+  EVENTS
+  MAINTENANCE
+
+  @@map("spatial_object_category")
+}
+
+enum SpatialObjectType {
+  WALL
+  DOOR
+  WINDOW
+  ROOM
+  STORE
+  STAIR
+  ELEVATOR
+  ESCALATOR
+  WASHROOM
+  FIRE_EXIT
+  ATM
+  PARKING_SPACE
+  BEACON
+  AR_ANCHOR
+  POI
+  QUEUE_ZONE
+  KIOSK
+  COLUMN
+  RAMP
+
+  @@map("spatial_object_type")
+}
+
+enum GeometryType {
+  POINT
+  LINE
+  POLYGON
+
+  @@map("geometry_type")
+}
+
+enum GraphStatus {
+  DRAFT
+  BUILDING
+  READY
+  PUBLISHED
+  ARCHIVED
+
+  @@map("graph_status")
+}
+
+model SpatialObject {
+  id            String                               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  blueprintId   String                               @map("blueprint_id") @db.Uuid
+  category      SpatialObjectCategory
+  type          SpatialObjectType
+  subtype       String?
+  name          String?
+  code          String?
+  geometry      Unsupported("geometry(Geometry, 0)")
+  geometryType  GeometryType                         @map("geometry_type")
+  level         Int
+  zIndex        Int                                  @default(0) @map("z_index")
+  accessibility Boolean                              @default(true)
+  navigable     Boolean                              @default(false)
+  searchable    Boolean                              @default(true)
+  metadata      Json                                 @default("{}")
+
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  archivedAt DateTime? @map("archived_at")
+
+  blueprint  Blueprint   @relation(fields: [blueprintId], references: [id], onDelete: Cascade)
+  graphNodes GraphNode[]
+
+  @@index([blueprintId])
+  @@index([category])
+  @@index([type])
+  @@index([level])
+  @@index([geometry], type: Gist)
+  @@map("spatial_objects")
+}
+
+model NavigationGraph {
+  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  blueprintId String      @unique @map("blueprint_id") @db.Uuid
+  version     Int         @default(1)
+  status      GraphStatus @default(DRAFT)
+  generatedAt DateTime?   @map("generated_at")
+  generatedBy String?     @map("generated_by")
+  metadata    Json        @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  blueprint Blueprint   @relation(fields: [blueprintId], references: [id], onDelete: Cascade)
+  nodes     GraphNode[]
+  edges     GraphEdge[]
+
+  @@index([status])
+  @@map("navigation_graphs")
+}
+
+model GraphNode {
+  id              String                            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  graphId         String                            @map("graph_id") @db.Uuid
+  spatialObjectId String?                           @map("spatial_object_id") @db.Uuid
+  geometry        Unsupported("geometry(Point, 0)")
+  nodeType        String                            @map("node_type")
+  floorLevel      Int                               @map("floor_level")
+  metadata        Json                              @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  graph         NavigationGraph @relation(fields: [graphId], references: [id], onDelete: Cascade)
+  spatialObject SpatialObject?  @relation(fields: [spatialObjectId], references: [id], onDelete: SetNull)
+  edgesFrom     GraphEdge[]     @relation("EdgeFromNode")
+  edgesTo       GraphEdge[]     @relation("EdgeToNode")
+
+  @@index([graphId])
+  @@index([spatialObjectId])
+  @@index([floorLevel])
+  @@index([geometry], type: Gist)
+  @@map("graph_nodes")
+}
+
+model GraphEdge {
+  id            String                                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  graphId       String                                 @map("graph_id") @db.Uuid
+  fromNodeId    String                                 @map("from_node_id") @db.Uuid
+  toNodeId      String                                 @map("to_node_id") @db.Uuid
+  geometry      Unsupported("geometry(LineString, 0)")
+  length        Float?
+  estimatedTime Float?                                 @map("estimated_time")
+  edgeType      String                                 @map("edge_type")
+  accessible    Boolean                                @default(true)
+  oneWay        Boolean                                @default(false) @map("one_way")
+  stairs        Boolean                                @default(false)
+  elevator      Boolean                                @default(false)
+  weight        Float?                                 @default(1)
+  cost          Float?
+  metadata      Json                                   @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  graph    NavigationGraph @relation(fields: [graphId], references: [id], onDelete: Cascade)
+  fromNode GraphNode       @relation("EdgeFromNode", fields: [fromNodeId], references: [id], onDelete: Cascade)
+  toNode   GraphNode       @relation("EdgeToNode", fields: [toNodeId], references: [id], onDelete: Cascade)
+
+  @@index([graphId])
+  @@index([fromNodeId])
+  @@index([toNodeId])
+  @@index([geometry], type: Gist)
+  @@map("graph_edges")
 }
