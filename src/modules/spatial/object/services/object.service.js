@@ -1,8 +1,7 @@
-const crypto = require("crypto");
 const SpatialObject = require("../models/object.model");
 const blueprintService = require("../../blueprint/services/blueprint.service");
-
-const objects = [];
+const floorRepository = require("../../../../repositories/floor/floor.repository");
+const spatialRepository = require("../../../../repositories/spatial.repository");
 
 const SUPPORTED_TYPES = [
   "wall",
@@ -32,6 +31,33 @@ const SUPPORTED_LAYERS = [
 const SUPPORTED_STATES = ["enabled", "disabled"];
 
 const SUPPORTED_GEOMETRY_TYPES = ["Point", "Line", "Polygon"];
+
+// Bridges the API's long-established vocabulary (lowercase/hyphenated type,
+// Title-case layer) to the Prisma enums introduced by the spatial schema.
+// Kept here (not in the repository) because the mapping is a business/domain
+// decision about what old values mean in the new type system.
+const TYPE_TO_PRISMA_TYPE = {
+  wall: "WALL",
+  door: "DOOR",
+  room: "ROOM",
+  store: "STORE",
+  stairs: "STAIR",
+  elevator: "ELEVATOR",
+  escalator: "ESCALATOR",
+  washroom: "WASHROOM",
+  "fire-exit": "FIRE_EXIT",
+  atm: "ATM",
+  parking: "PARKING_SPACE",
+  poi: "POI",
+};
+
+const PRISMA_TYPE_TO_TYPE = Object.fromEntries(
+  Object.entries(TYPE_TO_PRISMA_TYPE).map(([type, prismaType]) => [prismaType, type])
+);
+
+function toTitleCase(value) {
+  return value.charAt(0) + value.slice(1).toLowerCase();
+}
 
 function isFiniteNumber(value) {
   return typeof value === "number" && Number.isFinite(value);
@@ -107,8 +133,25 @@ function validateObjectInput(data) {
   return errors;
 }
 
+function toSpatialObject(record) {
+  return new SpatialObject({
+    id: record.id,
+    blueprintId: record.blueprintId,
+    type: PRISMA_TYPE_TO_TYPE[record.type],
+    name: record.name,
+    geometry: record.geometry,
+    layer: toTitleCase(record.category),
+    properties: record.properties,
+    relationships: record.relationships,
+    state: record.state,
+    metadata: record.metadata,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  });
+}
+
 async function createObject(blueprintId, data) {
-  await blueprintService.getBlueprintById(blueprintId);
+  const blueprint = await blueprintService.getBlueprintById(blueprintId);
 
   const errors = validateObjectInput(data);
 
@@ -118,44 +161,43 @@ async function createObject(blueprintId, data) {
     throw error;
   }
 
-  const now = new Date().toISOString();
+  const floor = await floorRepository.findById(blueprint.floorId);
 
-  const object = new SpatialObject({
-    id: crypto.randomUUID(),
+  const record = await spatialRepository.createObject({
     blueprintId,
-    type: data.type,
-    name: data.name || null,
+    category: data.layer.toUpperCase(),
+    type: TYPE_TO_PRISMA_TYPE[data.type],
     geometry: data.geometry,
-    layer: data.layer,
+    geometryType: data.geometry.type.toUpperCase(),
+    level: floor.level,
+    name: data.name || null,
     properties: data.properties || {},
     relationships: data.relationships || [],
     state: data.state,
     metadata: data.metadata || {},
-    createdAt: now,
-    updatedAt: now,
   });
 
-  objects.push(object);
-
-  return object;
+  return toSpatialObject(record);
 }
 
 async function getObjectsByBlueprintId(blueprintId) {
   await blueprintService.getBlueprintById(blueprintId);
 
-  return objects.filter((object) => object.blueprintId === blueprintId);
+  const records = await spatialRepository.findObjectsByBlueprintId(blueprintId);
+
+  return records.map(toSpatialObject);
 }
 
-function getObjectById(objectId) {
-  const object = objects.find((o) => o.id === objectId);
+async function getObjectById(objectId) {
+  const record = await spatialRepository.findObjectById(objectId);
 
-  if (!object) {
+  if (!record) {
     const error = new Error("Spatial Object not found");
     error.statusCode = 404;
     throw error;
   }
 
-  return object;
+  return toSpatialObject(record);
 }
 
 module.exports = {

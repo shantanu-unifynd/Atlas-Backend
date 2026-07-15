@@ -32,9 +32,9 @@ async function getObjectsByBlueprint(req, res, next) {
   }
 }
 
-function getObjectById(req, res, next) {
+async function getObjectById(req, res, next) {
   try {
-    const object = objectService.getObjectById(req.params.objectId);
+    const object = await objectService.getObjectById(req.params.objectId);
     return successResponse(res, {
       statusCode: 200,
       message: "Spatial Object fetched successfully",

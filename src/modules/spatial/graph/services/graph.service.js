@@ -1,13 +1,26 @@
-const crypto = require("crypto");
+const { Prisma } = require("@prisma/client");
 const NavigationGraph = require("../models/graph.model");
 const blueprintService = require("../../blueprint/services/blueprint.service");
+const spatialRepository = require("../../../../repositories/spatial.repository");
 
-const graphs = [];
+function toNavigationGraph(record) {
+  return new NavigationGraph({
+    id: record.id,
+    blueprintId: record.blueprintId,
+    version: record.version,
+    status: record.status.toLowerCase(),
+    nodes: [],
+    edges: [],
+    metadata: record.metadata,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  });
+}
 
 async function createGraph(blueprintId) {
   await blueprintService.getBlueprintById(blueprintId);
 
-  const existing = graphs.find((g) => g.blueprintId === blueprintId);
+  const existing = await spatialRepository.findGraphByBlueprintId(blueprintId);
 
   if (existing) {
     const error = new Error("Blueprint already has a navigation graph");
@@ -15,49 +28,44 @@ async function createGraph(blueprintId) {
     throw error;
   }
 
-  const now = new Date().toISOString();
+  try {
+    const record = await spatialRepository.createGraph({ blueprintId });
+    return toNavigationGraph(record);
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const conflict = new Error("Blueprint already has a navigation graph");
+      conflict.statusCode = 409;
+      throw conflict;
+    }
 
-  const graph = new NavigationGraph({
-    id: crypto.randomUUID(),
-    blueprintId,
-    version: 1,
-    status: "draft",
-    nodes: [],
-    edges: [],
-    metadata: {},
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  graphs.push(graph);
-
-  return graph;
+    throw error;
+  }
 }
 
 async function getGraphByBlueprintId(blueprintId) {
   await blueprintService.getBlueprintById(blueprintId);
 
-  const graph = graphs.find((g) => g.blueprintId === blueprintId);
+  const record = await spatialRepository.findGraphByBlueprintId(blueprintId);
 
-  if (!graph) {
+  if (!record) {
     const error = new Error("Navigation Graph not found");
     error.statusCode = 404;
     throw error;
   }
 
-  return graph;
+  return toNavigationGraph(record);
 }
 
-function getGraphById(graphId) {
-  const graph = graphs.find((g) => g.id === graphId);
+async function getGraphById(graphId) {
+  const record = await spatialRepository.findGraphById(graphId);
 
-  if (!graph) {
+  if (!record) {
     const error = new Error("Navigation Graph not found");
     error.statusCode = 404;
     throw error;
   }
 
-  return graph;
+  return toNavigationGraph(record);
 }
 
 module.exports = {
