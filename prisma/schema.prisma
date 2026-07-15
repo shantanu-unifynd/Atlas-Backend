@@ -32,7 +32,8 @@ model Building {
   updatedAt  DateTime  @updatedAt @map("updated_at")
   archivedAt DateTime? @map("archived_at")
 
-  floors Floor[]
+  floors           Floor[]
+  blueprintImports BlueprintImport[]
 
   @@index([status])
   @@index([city, country])
@@ -53,9 +54,10 @@ model Floor {
   updatedAt  DateTime  @updatedAt @map("updated_at")
   archivedAt DateTime? @map("archived_at")
 
-  building  Building   @relation(fields: [buildingId], references: [id], onDelete: Cascade)
-  assets    Asset[]
-  blueprint Blueprint?
+  building         Building          @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  assets           Asset[]
+  blueprint        Blueprint?
+  blueprintImports BlueprintImport[]
 
   @@unique([buildingId, level])
   @@index([buildingId])
@@ -285,4 +287,74 @@ model GraphEdge {
   @@index([toNodeId])
   @@index([geometry], type: Gist)
   @@map("graph_edges")
+}
+
+// Sprint 05 Story 01 — Blueprint Import Pipeline.
+// Tracks the raw, opaque upload and its lifecycle (Stage 1 of the Spatial
+// Processing Pipeline). Distinct from Blueprint (Sprint 03), which represents
+// the normalized spatial representation produced by later pipeline stages.
+enum BlueprintImportStatus {
+  UPLOADED
+  VALIDATING
+  FAILED
+  NORMALIZED
+
+  @@map("blueprint_import_status")
+}
+
+model BlueprintImport {
+  id               String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  buildingId       String                @map("building_id") @db.Uuid
+  floorId          String                @map("floor_id") @db.Uuid
+  version          Int
+  originalFilename String                @map("original_filename")
+  mimeType         String                @map("mime_type")
+  fileSize         Int                   @map("file_size")
+  checksum         String
+  storageProvider  String                @default("local") @map("storage_provider")
+  storageKey       String                @map("storage_key")
+  status           BlueprintImportStatus @default(UPLOADED)
+  errorMessage     String?               @map("error_message")
+  metadata         Json                  @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  building Building @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  floor    Floor    @relation(fields: [floorId], references: [id], onDelete: Cascade)
+
+  normalizedBlueprint NormalizedBlueprint?
+
+  @@unique([floorId, version])
+  @@index([buildingId])
+  @@index([floorId])
+  @@index([status])
+  @@index([checksum])
+  @@map("blueprint_imports")
+}
+
+// Sprint 05 Story 02 — Blueprint Validation & Normalization.
+// Persisted Atlas Canonical Spatial Model (ACSM): the format-agnostic,
+// canonical representation every later pipeline stage (geometry extraction,
+// USO generation, navigation graph generation) will consume instead of the
+// original file. One per BlueprintImport (immutable input -> immutable
+// normalized output); a re-normalization would only ever happen for a new
+// BlueprintImport version, never by mutating this row.
+model NormalizedBlueprint {
+  id                String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  blueprintImportId String @unique @map("blueprint_import_id") @db.Uuid
+  sourceFormat      String @map("source_format")
+  coordinateSystem  Json   @map("coordinate_system")
+  bounds            Json
+  layers            Json
+  elements          Json
+  relationships     Json   @default("[]")
+  metadata          Json   @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  blueprintImport BlueprintImport @relation(fields: [blueprintImportId], references: [id], onDelete: Cascade)
+
+  @@map("normalized_blueprints")
 }
