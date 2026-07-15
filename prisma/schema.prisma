@@ -355,6 +355,31 @@ model NormalizedBlueprint {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   blueprintImport BlueprintImport @relation(fields: [blueprintImportId], references: [id], onDelete: Cascade)
+  geometryModel   GeometryModel?
 
   @@map("normalized_blueprints")
+}
+
+// Sprint 05 Story 03 Phase A — Geometry Extraction Engine skeleton.
+// Persisted output of the Geometry Extraction Engine: primitives collected
+// from the ACSM, minimally cleaned, plus skeleton containers for topology /
+// candidate objects / relationships that later phases populate with real
+// algorithms. One per NormalizedBlueprint, same immutable-stage-output
+// pattern as NormalizedBlueprint itself.
+model GeometryModel {
+  id                    String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  normalizedBlueprintId String @unique @map("normalized_blueprint_id") @db.Uuid
+  primitives            Json
+  cleanedGeometry       Json   @map("cleaned_geometry")
+  topology              Json
+  candidateObjects      Json   @map("candidate_objects")
+  relationships         Json   @default("[]")
+  diagnostics           Json
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  normalizedBlueprint NormalizedBlueprint @relation(fields: [normalizedBlueprintId], references: [id], onDelete: Cascade)
+
+  @@map("geometry_models")
 }
