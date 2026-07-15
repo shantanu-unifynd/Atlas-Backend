@@ -12,3 +12,113 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+model Building {
+  id         String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code       String  @unique
+  name       String
+  country    String
+  state      String?
+  city       String
+  address    String
+  postalCode String? @map("postal_code")
+  latitude   Float?
+  longitude  Float?
+  timezone   String
+  status     String  @default("active")
+  ownerName  String? @map("owner_name")
+
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  archivedAt DateTime? @map("archived_at")
+
+  floors Floor[]
+
+  @@index([status])
+  @@index([city, country])
+  @@map("buildings")
+}
+
+model Floor {
+  id           String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  buildingId   String  @map("building_id") @db.Uuid
+  level        Int
+  name         String
+  shortName    String? @map("short_name")
+  displayOrder Int?    @map("display_order")
+  publicAccess Boolean @default(true) @map("public_access")
+  status       String  @default("draft")
+
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  archivedAt DateTime? @map("archived_at")
+
+  building  Building   @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  assets    Asset[]
+  blueprint Blueprint?
+
+  @@unique([buildingId, level])
+  @@index([buildingId])
+  @@index([status])
+  @@map("floors")
+}
+
+model Asset {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  floorId          String   @map("floor_id") @db.Uuid
+  type             String
+  filename         String
+  originalFilename String   @map("original_filename")
+  mimeType         String   @map("mime_type")
+  fileSize         Int      @map("file_size")
+  checksum         String?
+  storageProvider  String   @default("local") @map("storage_provider")
+  bucket           String?
+  objectKey        String   @map("object_key")
+  uploadedBy       String?  @map("uploaded_by")
+  uploadedAt       DateTime @default(now()) @map("uploaded_at")
+  processingStatus String   @default("pending") @map("processing_status")
+  metadata         Json     @default("{}")
+
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  archivedAt DateTime? @map("archived_at")
+
+  floor      Floor       @relation(fields: [floorId], references: [id], onDelete: Cascade)
+  blueprints Blueprint[]
+
+  @@unique([storageProvider, bucket, objectKey])
+  @@index([floorId])
+  @@index([processingStatus])
+  @@index([checksum])
+  @@map("assets")
+}
+
+model Blueprint {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  floorId          String    @unique @map("floor_id") @db.Uuid
+  assetId          String    @map("asset_id") @db.Uuid
+  version          Int       @default(1)
+  status           String    @default("pending")
+  width            Float?
+  height           Float?
+  scale            Float?
+  rotation         Float     @default(0)
+  originX          Float     @default(0) @map("origin_x")
+  originY          Float     @default(0) @map("origin_y")
+  processingStatus String    @default("pending") @map("processing_status")
+  importedAt       DateTime? @map("imported_at")
+  generatedAt      DateTime? @map("generated_at")
+  metadata         Json      @default("{}")
+
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  archivedAt DateTime? @map("archived_at")
+
+  floor Floor @relation(fields: [floorId], references: [id], onDelete: Cascade)
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  @@index([assetId])
+  @@index([status])
+  @@map("blueprints")
+}
