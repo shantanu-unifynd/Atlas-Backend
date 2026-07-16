@@ -379,7 +379,162 @@ model GeometryModel {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  normalizedBlueprint NormalizedBlueprint @relation(fields: [normalizedBlueprintId], references: [id], onDelete: Cascade)
+  normalizedBlueprint     NormalizedBlueprint                  @relation(fields: [normalizedBlueprintId], references: [id], onDelete: Cascade)
+  universalSpatialObjects UniversalSpatialObject[]
+  usoRelationships        UniversalSpatialObjectRelationship[]
 
   @@map("geometry_models")
+}
+
+// Sprint 05 Story 04 Phase A — Universal Spatial Object Generation Engine.
+// One row per generated USO (not a JSON blob column) — mirrors the Sprint 03
+// SpatialObject precedent, since "USO identity must remain stable" and later
+// phases (semantic classification, navigation graph generation) will need to
+// enrich individual USOs in place without touching the rest of the batch.
+enum UsoSpatialCategory {
+  BOUNDARY
+  WALL
+  ENCLOSURE
+  OPENING
+  PASSAGE
+  VERTICAL_CONNECTION
+
+  @@map("uso_spatial_category")
+}
+
+// Sprint 05 Story 04 Phase C — lifecycle. GENERATED is the initial state for
+// every new USO; production validation (post-persistence) may promote it to
+// VALIDATED. PUBLISHED/DEPRECATED exist as destination states for future
+// workflows — this phase implements neither the publishing nor the approval
+// workflow that would transition into them.
+enum UsoLifecycleStatus {
+  GENERATED
+  VALIDATED
+  PUBLISHED
+  DEPRECATED
+
+  @@map("uso_lifecycle_status")
+}
+
+model UniversalSpatialObject {
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  geometryModelId   String             @map("geometry_model_id") @db.Uuid
+  candidateId       String             @map("candidate_id")
+  candidateType     String             @map("candidate_type")
+  spatialCategory   UsoSpatialCategory @map("spatial_category")
+  version           Int                @default(1)
+  // Lightweight version metadata (not version history): bumped whenever this
+  // same row is meaningfully updated in place (e.g. a lifecycle transition),
+  // so a consumer can tell "has this been touched since generation" without
+  // a separate history table or a duplicate representation.
+  revision          Int                @default(1)
+  status            UsoLifecycleStatus @default(GENERATED)
+  generatedAt       DateTime           @default(now()) @map("generated_at")
+  generatedFrom     String             @map("generated_from")
+  geometryReference Json               @map("geometry_reference")
+  accessibility     Json
+  // Vestigial Phase A placeholder — superseded by UniversalSpatialObjectRelationship
+  // (Phase B persists relationships as first-class rows, not an embedded array).
+  // Left in place rather than removed, per "do not redesign existing architecture".
+  // Always empty going forward; the API response's `relationships` field is
+  // populated by joining the dedicated relationship table instead.
+  relationships     Json               @default("[]")
+  metadata          Json               @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  geometryModel       GeometryModel                        @relation(fields: [geometryModelId], references: [id], onDelete: Cascade)
+  sourceRelationships UniversalSpatialObjectRelationship[] @relation("SourceUso")
+  targetRelationships UniversalSpatialObjectRelationship[] @relation("TargetUso")
+  semanticModel       SemanticModel?
+
+  @@unique([geometryModelId, candidateId])
+  @@index([geometryModelId])
+  @@index([spatialCategory])
+  @@map("universal_spatial_objects")
+}
+
+// Sprint 05 Story 04 Phase B — relationships persisted as first-class rows,
+// not attached arrays. Deterministic only: every row is derived directly
+// from Phase C's candidate-level relationships (geometry/topology), never
+// from names, metadata, or inference — hence confidence is always 1.0 today.
+enum UsoRelationshipType {
+  ADJACENT_TO
+  CONTAINS
+  WITHIN
+  BOUNDED_BY
+  CONNECTS
+  TOUCHES
+  INTERSECTS
+
+  @@map("uso_relationship_type")
+}
+
+model UniversalSpatialObjectRelationship {
+  id               String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  geometryModelId  String              @map("geometry_model_id") @db.Uuid
+  sourceUsoId      String              @map("source_uso_id") @db.Uuid
+  targetUsoId      String              @map("target_uso_id") @db.Uuid
+  relationshipType UsoRelationshipType @map("relationship_type")
+  confidence       Float               @default(1.0)
+  metadata         Json                @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  geometryModel GeometryModel          @relation(fields: [geometryModelId], references: [id], onDelete: Cascade)
+  sourceUso     UniversalSpatialObject @relation("SourceUso", fields: [sourceUsoId], references: [id], onDelete: Cascade)
+  targetUso     UniversalSpatialObject @relation("TargetUso", fields: [targetUsoId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceUsoId, targetUsoId, relationshipType])
+  @@index([geometryModelId])
+  @@index([sourceUsoId])
+  @@index([targetUsoId])
+  @@index([relationshipType])
+  @@map("uso_relationships")
+}
+
+// Sprint 05 Story 05 Phase A — Semantic Classification Framework.
+// The Semantic Model references a USO but never modifies it — geometry and
+// spatial identity remain the USO's exclusive concern; this table stores
+// only interpretation. One per USO (usoId unique): this phase's framework
+// creates every row as UNCLASSIFIED with a zero-confidence placeholder,
+// since no classification rule is implemented yet. The lifecycle mirrors
+// classification-rules.md's own "Deterministic Rules -> Machine Learning ->
+// Human Verification -> Published Semantic Model" evolution.
+enum SemanticLifecycleStatus {
+  UNCLASSIFIED
+  CLASSIFIED
+  VERIFIED
+  PUBLISHED
+
+  @@map("semantic_lifecycle_status")
+}
+
+model SemanticModel {
+  id                   String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  usoId                String                  @unique @map("uso_id") @db.Uuid
+  geometryModelId      String                  @map("geometry_model_id") @db.Uuid
+  semanticVersion      Int                     @default(1) @map("semantic_version")
+  lifecycle            SemanticLifecycleStatus @default(UNCLASSIFIED)
+  semanticCategory     String?                 @map("semantic_category")
+  semanticSubCategory  String?                 @map("semantic_sub_category")
+  classificationSource String?                 @map("classification_source")
+  ruleId               String?                 @map("rule_id")
+  ruleVersion          Int?                    @map("rule_version")
+  confidenceValue      Float                   @map("confidence_value")
+  confidenceSource     String                  @map("confidence_source")
+  confidenceReason     String                  @map("confidence_reason")
+  classifiedAt         DateTime?               @map("classified_at")
+  metadata             Json                    @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  uso UniversalSpatialObject @relation(fields: [usoId], references: [id], onDelete: Cascade)
+
+  @@index([geometryModelId])
+  @@index([lifecycle])
+  @@index([semanticCategory])
+  @@map("semantic_models")
 }

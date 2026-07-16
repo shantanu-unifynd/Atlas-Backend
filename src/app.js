@@ -9,6 +9,8 @@ const graphRoutes = require("./modules/spatial/graph/routes/graph.routes");
 const blueprintImportRoutes = require("./modules/spatial/processing/routes/blueprintImport.routes");
 const normalizationRoutes = require("./modules/spatial/normalization/routes/normalization.routes");
 const geometryRoutes = require("./modules/spatial/processing/geometry/routes/geometry.routes");
+const usoRoutes = require("./modules/spatial/uso/routes/uso.routes");
+const semanticRoutes = require("./modules/spatial/semantic/routes/semantic.routes");
 const healthRoutes = require("./modules/health/routes/health.routes");
 const errorHandler = require("./common/middlewares/errorHandler");
 
@@ -36,6 +38,8 @@ app.use(
   "/api/buildings/:buildingId/floors/:floorId/blueprint-imports/:importId",
   geometryRoutes
 );
+app.use("/api/geometry/:geometryId", usoRoutes);
+app.use("/api/usos/:usoModelId", semanticRoutes);
 app.use("/health", healthRoutes);
 
 app.use(errorHandler);
