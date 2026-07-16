@@ -502,31 +502,49 @@ model UniversalSpatialObjectRelationship {
 // since no classification rule is implemented yet. The lifecycle mirrors
 // classification-rules.md's own "Deterministic Rules -> Machine Learning ->
 // Human Verification -> Published Semantic Model" evolution.
+// Sprint 05 Story 05 Phase C — production lifecycle. Renamed from the
+// Phase B value set (UNCLASSIFIED/CLASSIFIED/VERIFIED/PUBLISHED), which
+// conflated "was this classified" (a semantic outcome, still visible via
+// semanticCategory being null or not) with "is this row production-ready"
+// (a lifecycle concern). Mirrors UsoLifecycleStatus's naming for
+// consistency, but stays a distinct enum: a USO's lifecycle and a Semantic
+// Model's lifecycle are independent concepts that happen to share state
+// names today. Every new row starts GENERATED; no automatic transition
+// beyond that is implemented in this phase.
 enum SemanticLifecycleStatus {
-  UNCLASSIFIED
-  CLASSIFIED
-  VERIFIED
+  GENERATED
+  VALIDATED
   PUBLISHED
+  DEPRECATED
 
   @@map("semantic_lifecycle_status")
 }
 
 model SemanticModel {
-  id                   String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  usoId                String                  @unique @map("uso_id") @db.Uuid
-  geometryModelId      String                  @map("geometry_model_id") @db.Uuid
-  semanticVersion      Int                     @default(1) @map("semantic_version")
-  lifecycle            SemanticLifecycleStatus @default(UNCLASSIFIED)
-  semanticCategory     String?                 @map("semantic_category")
-  semanticSubCategory  String?                 @map("semantic_sub_category")
-  classificationSource String?                 @map("classification_source")
-  ruleId               String?                 @map("rule_id")
-  ruleVersion          Int?                    @map("rule_version")
-  confidenceValue      Float                   @map("confidence_value")
-  confidenceSource     String                  @map("confidence_source")
-  confidenceReason     String                  @map("confidence_reason")
-  classifiedAt         DateTime?               @map("classified_at")
-  metadata             Json                    @default("{}")
+  id                    String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  usoId                 String                  @unique @map("uso_id") @db.Uuid
+  geometryModelId       String                  @map("geometry_model_id") @db.Uuid
+  semanticVersion       Int                     @default(1) @map("semantic_version")
+  // Version of the rule catalog active when this row was classified —
+  // distinct from ruleVersion (the specific winning rule's own version).
+  classificationVersion String                  @map("classification_version")
+  // Version of the overall semantic pipeline orchestration (the 9 stages).
+  pipelineVersion       String                  @map("pipeline_version")
+  // Version of the rule-execution engine itself, distinct from both of the
+  // above — a future engine rewrite could change this without touching the
+  // rule catalog or the pipeline's stage wiring.
+  engineVersion         String                  @map("engine_version")
+  lifecycle             SemanticLifecycleStatus @default(GENERATED)
+  semanticCategory      String?                 @map("semantic_category")
+  semanticSubCategory   String?                 @map("semantic_sub_category")
+  classificationSource  String?                 @map("classification_source")
+  ruleId                String?                 @map("rule_id")
+  ruleVersion           Int?                    @map("rule_version")
+  confidenceValue       Float                   @map("confidence_value")
+  confidenceSource      String                  @map("confidence_source")
+  confidenceReason      String                  @map("confidence_reason")
+  classifiedAt          DateTime?               @map("classified_at")
+  metadata              Json                    @default("{}")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

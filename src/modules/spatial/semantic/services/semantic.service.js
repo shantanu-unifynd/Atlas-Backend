@@ -1,20 +1,24 @@
+const { prisma } = require("../../../../config/database");
 const semanticModelRepository = require("../../../../repositories/semanticModel/semanticModel.repository");
 const SemanticModel = require("../models/semanticModel.model");
 const { loadUsoModel } = require("../pipeline/semantic-loader");
 const { validateSemanticInput } = require("../pipeline/semantic-validator");
 const { collectEvidence } = require("../pipeline/evidence-collector");
-const { executeRules } = require("../pipeline/rule-engine");
+const { executeRules, ENGINE_VERSION } = require("../pipeline/rule-engine");
+const { CLASSIFICATION_VERSION } = require("../pipeline/rules/deterministic-rules");
 const { resolveConflicts } = require("../pipeline/conflict-resolver");
 const { computeConfidence } = require("../pipeline/confidence-engine");
 const { buildSemanticModels } = require("../pipeline/semantic-model-builder");
 const { persistSemanticModels } = require("../pipeline/semantic-repository-stage");
+const { validateSemanticProduction } = require("../pipeline/semantic-production-validator");
 
-// Phase B: real deterministic rules populate the framework introduced in
-// Phase A. Pipeline stage order is unchanged (USO Model -> Semantic Loader
-// -> Semantic Validator -> Evidence Collector -> Rule Engine -> Conflict
-// Resolver -> Confidence Engine -> Semantic Model Builder -> Repository ->
-// Diagnostics).
-const PIPELINE_VERSION = "1.1.0";
+// Phase C: transactional persistence, production validation, lifecycle,
+// and version/provenance metadata. Pipeline stage order is unchanged
+// (USO Model -> Semantic Loader -> Semantic Validator -> Evidence Collector
+// -> Rule Engine -> Conflict Resolver -> Confidence Engine -> Semantic
+// Model Builder -> Repository -> Diagnostics). Classification logic itself
+// (the 5 rules, confidence values) is untouched from Phase B.
+const PIPELINE_VERSION = "1.2.0";
 
 function toSemanticModel(record) {
   return new SemanticModel(record);
@@ -50,12 +54,26 @@ async function generateSemanticModels(usoModelId) {
     validated.usos.map((uso) => [uso.id, computeConfidence(resolutionsByUsoId.get(uso.id))])
   );
 
-  const semanticModels = buildSemanticModels(validated.usos, resolutionsByUsoId, confidenceByUsoId);
+  const versions = {
+    classificationVersion: CLASSIFICATION_VERSION,
+    pipelineVersion: PIPELINE_VERSION,
+    engineVersion: ENGINE_VERSION,
+  };
 
+  const semanticModels = buildSemanticModels(validated.usos, resolutionsByUsoId, confidenceByUsoId, versions);
+
+  // Repository stage runs inside a single transaction: no partial
+  // persistence is allowed if any step fails. Today this covers one write
+  // (Semantic Models), but the transaction boundary is drawn around the
+  // whole persistence step so a future addition (e.g. semantic
+  // relationships) is automatically covered without touching this function
+  // again.
   let persisted;
 
   try {
-    persisted = await persistSemanticModels(semanticModels);
+    persisted = await prisma.$transaction(async (tx) => {
+      return persistSemanticModels(semanticModels, tx);
+    });
   } catch (error) {
     if (error?.code === "P2002") {
       throw conflictError();
@@ -63,6 +81,11 @@ async function generateSemanticModels(usoModelId) {
 
     throw error;
   }
+
+  // Production Validator: runs over what was actually persisted. Per Phase
+  // C's explicit instruction, no automatic lifecycle transition happens
+  // here — every row stays GENERATED regardless of validation outcome.
+  const productionReport = validateSemanticProduction({ usos: validated.usos, semanticModels: persisted });
 
   const processingFinished = new Date();
 
@@ -81,22 +104,25 @@ async function generateSemanticModels(usoModelId) {
   }
 
   const diagnostics = {
+    lifecycleState: "GENERATED",
+    semanticVersion: 1,
+    classificationVersion: CLASSIFICATION_VERSION,
     pipelineVersion: PIPELINE_VERSION,
+    engineVersion: ENGINE_VERSION,
     processingStarted: processingStarted.toISOString(),
     processingFinished: processingFinished.toISOString(),
     processingDuration: processingFinished.getTime() - processingStarted.getTime(),
-    semanticCandidates: validated.usos.length,
-    semanticModelsCreated: persisted.length,
+    generatedCount: persisted.length,
+    skippedCount: validated.errors.length,
     rulesExecuted,
     rulesMatched,
     winningRule,
     discardedRules,
     conflictsDetected,
     semanticObjectsClassified,
-    semanticObjectsSkipped: validated.errors.length,
     unclassifiedObjects,
-    warnings: validated.warnings,
-    validationErrors: validated.errors,
+    warnings: [...validated.warnings, ...productionReport.warnings],
+    errors: [...validated.errors, ...productionReport.errors],
   };
 
   return {

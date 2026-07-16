@@ -7,6 +7,9 @@ class SemanticModel {
     usoId,
     geometryModelId,
     semanticVersion,
+    classificationVersion,
+    pipelineVersion,
+    engineVersion,
     lifecycle,
     semanticCategory,
     semanticSubCategory,
@@ -22,14 +25,19 @@ class SemanticModel {
     updatedAt,
   }) {
     this.semanticId = id;
-    this.semanticVersion = semanticVersion;
     this.lifecycle = lifecycle;
+    this.version = {
+      semanticVersion,
+      classificationVersion,
+      pipelineVersion,
+    };
     this.classification = {
       semanticCategory,
       semanticSubCategory,
       source: classificationSource,
       ruleId,
       ruleVersion,
+      engineVersion,
     };
     this.confidence = {
       value: confidenceValue,

@@ -6,6 +6,13 @@
 
 const { DETERMINISTIC_RULES } = require("./rules/deterministic-rules");
 
+// Version of the rule-EXECUTION engine itself (registration/execution/
+// collection logic in this file) — distinct from the rule catalog's own
+// version (rules/deterministic-rules.js) and the overall pipeline's version
+// (semantic.service.js). A future engine rewrite (e.g. parallel execution,
+// a different matching strategy) would bump this independently of either.
+const ENGINE_VERSION = "1.0.0";
+
 const registeredRules = [];
 
 function registerRule(rule) {
@@ -63,4 +70,5 @@ module.exports = {
   registerRule,
   getRegisteredRules,
   executeRules,
+  ENGINE_VERSION,
 };

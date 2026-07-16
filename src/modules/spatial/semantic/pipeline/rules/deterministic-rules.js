@@ -81,6 +81,12 @@ const DETERMINISTIC_RULES = [
   }),
 ];
 
+// Version of this rule catalog as a whole — bumped when rules are added,
+// removed, or re-tuned as a set, independent of any single rule's own
+// `version` or the rule-execution engine's own version.
+const CLASSIFICATION_VERSION = "1.0.0";
+
 module.exports = {
   DETERMINISTIC_RULES,
+  CLASSIFICATION_VERSION,
 };
