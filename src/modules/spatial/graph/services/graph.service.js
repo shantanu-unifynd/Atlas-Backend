@@ -1,10 +1,10 @@
 const { Prisma } = require("@prisma/client");
-const NavigationGraph = require("../models/graph.model");
+const LegacyNavigationGraph = require("../models/graph.model");
 const blueprintService = require("../../blueprint/services/blueprint.service");
 const spatialRepository = require("../../../../repositories/spatial.repository");
 
-function toNavigationGraph(record) {
-  return new NavigationGraph({
+function toLegacyNavigationGraph(record) {
+  return new LegacyNavigationGraph({
     id: record.id,
     blueprintId: record.blueprintId,
     version: record.version,
@@ -30,7 +30,7 @@ async function createGraph(blueprintId) {
 
   try {
     const record = await spatialRepository.createGraph({ blueprintId });
-    return toNavigationGraph(record);
+    return toLegacyNavigationGraph(record);
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       const conflict = new Error("Blueprint already has a navigation graph");
@@ -53,7 +53,7 @@ async function getGraphByBlueprintId(blueprintId) {
     throw error;
   }
 
-  return toNavigationGraph(record);
+  return toLegacyNavigationGraph(record);
 }
 
 async function getGraphById(graphId) {
@@ -65,7 +65,7 @@ async function getGraphById(graphId) {
     throw error;
   }
 
-  return toNavigationGraph(record);
+  return toLegacyNavigationGraph(record);
 }
 
 module.exports = {

@@ -1,4 +1,9 @@
-class NavigationGraph {
+// Sprint 03 Story 03 legacy graph DTO (backs LegacyNavigationGraph). Renamed
+// from NavigationGraph in the Sprint 06 Story 01 architectural refactor to
+// remove ambiguity with the canonical NavigationGraph domain — this is a
+// pure internal rename, JSON output is unchanged (JSON.stringify never
+// serializes a class name).
+class LegacyNavigationGraph {
   constructor({
     id,
     blueprintId,
@@ -22,4 +27,4 @@ class NavigationGraph {
   }
 }
 
-module.exports = NavigationGraph;
+module.exports = LegacyNavigationGraph;

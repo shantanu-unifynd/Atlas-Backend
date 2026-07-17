@@ -7,11 +7,11 @@ function isValidUuid(id) {
 }
 
 // -- Geometry <-> WKT/GeoJSON -----------------------------------------------
-// SpatialObject/GraphNode/GraphEdge geometry columns are PostGIS-native
-// (Unsupported("geometry...") in schema.prisma), so Prisma's typed client
-// can never read or write them. Every geometry-bearing table is therefore
-// persisted via raw SQL, translating to/from WKT and GeoJSON at the
-// boundary so nothing outside this repository ever sees SQL, WKT or GeoJSON.
+// SpatialObject's geometry column is PostGIS-native (Unsupported("geometry...")
+// in schema.prisma), so Prisma's typed client can never read or write it.
+// It is therefore persisted via raw SQL, translating to/from WKT and GeoJSON
+// at the boundary so nothing outside this repository ever sees SQL, WKT or
+// GeoJSON.
 
 function pointToWKT(point) {
   return `POINT(${point.x} ${point.y})`;
@@ -155,15 +155,22 @@ async function findObjectsByBlueprintId(blueprintId) {
   return rows.map(mapObjectRow);
 }
 
-// -- NavigationGraph ---------------------------------------------------------
-// No geometry column on this table, so plain Prisma Client is sufficient.
+// -- LegacyNavigationGraph -----------------------------------------------------
+// Sprint 03 Story 03's original graph container, kept only because it is
+// still exposed live via POST/GET /api/blueprints/:blueprintId/graph. Its
+// GraphNode/GraphEdge child tables were confirmed dead (no service,
+// controller, or route ever created/read a row in either) and were dropped
+// entirely in the Sprint 06 Story 01 architectural refactor — Atlas's
+// canonical Navigation Graph domain now lives in
+// src/repositories/navigationGraph|navigationNode|navigationEdge. No geometry
+// column on this table, so plain Prisma Client is sufficient.
 
 function createGraph(data) {
-  return prisma.navigationGraph.create({ data });
+  return prisma.legacyNavigationGraph.create({ data });
 }
 
 function findGraphByBlueprintId(blueprintId) {
-  return prisma.navigationGraph.findUnique({ where: { blueprintId } });
+  return prisma.legacyNavigationGraph.findUnique({ where: { blueprintId } });
 }
 
 function findGraphById(id) {
@@ -171,159 +178,7 @@ function findGraphById(id) {
     return null;
   }
 
-  return prisma.navigationGraph.findUnique({ where: { id } });
-}
-
-// -- GraphNode ---------------------------------------------------------------
-// No dedicated endpoint exists yet (graph generation is a future story); these
-// exist so the repository fully owns GraphNode persistence as required, ready
-// for that future story to call.
-
-function mapNodeRow(row) {
-  return {
-    id: row.id,
-    graphId: row.graph_id,
-    spatialObjectId: row.spatial_object_id,
-    geometry: geoJsonToGeometry(JSON.parse(row.geometry_geojson)),
-    nodeType: row.node_type,
-    floorLevel: row.floor_level,
-    metadata: row.metadata,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-async function createNode(data) {
-  const wkt = pointToWKT(data.geometry.coordinates);
-  const metadata = JSON.stringify(data.metadata || {});
-
-  const rows = await prisma.$queryRaw`
-    INSERT INTO graph_nodes (
-      id, graph_id, spatial_object_id, geometry, node_type, floor_level,
-      metadata, created_at, updated_at
-    )
-    VALUES (
-      gen_random_uuid(), ${data.graphId}::uuid, ${data.spatialObjectId || null}::uuid,
-      ST_GeomFromText(${wkt}, 0), ${data.nodeType}, ${data.floorLevel},
-      ${metadata}::jsonb, now(), now()
-    )
-    RETURNING
-      id, graph_id, spatial_object_id, ST_AsGeoJSON(geometry) AS geometry_geojson,
-      node_type, floor_level, metadata, created_at, updated_at
-  `;
-
-  return mapNodeRow(rows[0]);
-}
-
-async function findNodesByGraphId(graphId) {
-  const rows = await prisma.$queryRaw`
-    SELECT
-      id, graph_id, spatial_object_id, ST_AsGeoJSON(geometry) AS geometry_geojson,
-      node_type, floor_level, metadata, created_at, updated_at
-    FROM graph_nodes
-    WHERE graph_id = ${graphId}::uuid
-    ORDER BY created_at ASC
-  `;
-
-  return rows.map(mapNodeRow);
-}
-
-async function findNodeById(id) {
-  if (!isValidUuid(id)) {
-    return null;
-  }
-
-  const rows = await prisma.$queryRaw`
-    SELECT
-      id, graph_id, spatial_object_id, ST_AsGeoJSON(geometry) AS geometry_geojson,
-      node_type, floor_level, metadata, created_at, updated_at
-    FROM graph_nodes
-    WHERE id = ${id}::uuid
-  `;
-
-  return rows[0] ? mapNodeRow(rows[0]) : null;
-}
-
-// -- GraphEdge ----------------------------------------------------------------
-// Same rationale as GraphNode: no endpoint yet, persistence owned here.
-
-function mapEdgeRow(row) {
-  return {
-    id: row.id,
-    graphId: row.graph_id,
-    fromNodeId: row.from_node_id,
-    toNodeId: row.to_node_id,
-    geometry: geoJsonToGeometry(JSON.parse(row.geometry_geojson)),
-    length: row.length,
-    estimatedTime: row.estimated_time,
-    edgeType: row.edge_type,
-    accessible: row.accessible,
-    oneWay: row.one_way,
-    stairs: row.stairs,
-    elevator: row.elevator,
-    weight: row.weight,
-    cost: row.cost,
-    metadata: row.metadata,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-async function createEdge(data) {
-  const wkt = lineToWKT(data.geometry.coordinates);
-  const metadata = JSON.stringify(data.metadata || {});
-
-  const rows = await prisma.$queryRaw`
-    INSERT INTO graph_edges (
-      id, graph_id, from_node_id, to_node_id, geometry, length, estimated_time,
-      edge_type, accessible, one_way, stairs, elevator, weight, cost,
-      metadata, created_at, updated_at
-    )
-    VALUES (
-      gen_random_uuid(), ${data.graphId}::uuid, ${data.fromNodeId}::uuid, ${data.toNodeId}::uuid,
-      ST_GeomFromText(${wkt}, 0), ${data.length ?? null}, ${data.estimatedTime ?? null},
-      ${data.edgeType}, ${data.accessible ?? true}, ${data.oneWay ?? false},
-      ${data.stairs ?? false}, ${data.elevator ?? false}, ${data.weight ?? 1}, ${data.cost ?? null},
-      ${metadata}::jsonb, now(), now()
-    )
-    RETURNING
-      id, graph_id, from_node_id, to_node_id, ST_AsGeoJSON(geometry) AS geometry_geojson,
-      length, estimated_time, edge_type, accessible, one_way, stairs, elevator,
-      weight, cost, metadata, created_at, updated_at
-  `;
-
-  return mapEdgeRow(rows[0]);
-}
-
-async function findEdgesByGraphId(graphId) {
-  const rows = await prisma.$queryRaw`
-    SELECT
-      id, graph_id, from_node_id, to_node_id, ST_AsGeoJSON(geometry) AS geometry_geojson,
-      length, estimated_time, edge_type, accessible, one_way, stairs, elevator,
-      weight, cost, metadata, created_at, updated_at
-    FROM graph_edges
-    WHERE graph_id = ${graphId}::uuid
-    ORDER BY created_at ASC
-  `;
-
-  return rows.map(mapEdgeRow);
-}
-
-async function findEdgeById(id) {
-  if (!isValidUuid(id)) {
-    return null;
-  }
-
-  const rows = await prisma.$queryRaw`
-    SELECT
-      id, graph_id, from_node_id, to_node_id, ST_AsGeoJSON(geometry) AS geometry_geojson,
-      length, estimated_time, edge_type, accessible, one_way, stairs, elevator,
-      weight, cost, metadata, created_at, updated_at
-    FROM graph_edges
-    WHERE id = ${id}::uuid
-  `;
-
-  return rows[0] ? mapEdgeRow(rows[0]) : null;
+  return prisma.legacyNavigationGraph.findUnique({ where: { id } });
 }
 
 module.exports = {
@@ -333,10 +188,4 @@ module.exports = {
   createGraph,
   findGraphByBlueprintId,
   findGraphById,
-  createNode,
-  findNodesByGraphId,
-  findNodeById,
-  createEdge,
-  findEdgesByGraphId,
-  findEdgeById,
 };

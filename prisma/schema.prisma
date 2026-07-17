@@ -34,6 +34,7 @@ model Building {
 
   floors           Floor[]
   blueprintImports BlueprintImport[]
+  navigationGraphs NavigationGraph[]
 
   @@index([status])
   @@index([city, country])
@@ -58,6 +59,7 @@ model Floor {
   assets           Asset[]
   blueprint        Blueprint?
   blueprintImports BlueprintImport[]
+  navigationGraphs NavigationGraph[]
 
   @@unique([buildingId, level])
   @@index([buildingId])
@@ -120,8 +122,8 @@ model Blueprint {
   floor Floor @relation(fields: [floorId], references: [id], onDelete: Cascade)
   asset Asset @relation(fields: [assetId], references: [id], onDelete: Restrict)
 
-  spatialObjects  SpatialObject[]
-  navigationGraph NavigationGraph?
+  spatialObjects        SpatialObject[]
+  legacyNavigationGraph LegacyNavigationGraph?
 
   @@index([assetId])
   @@index([status])
@@ -172,14 +174,18 @@ enum GeometryType {
   @@map("geometry_type")
 }
 
-enum GraphStatus {
+// Sprint 03 Story 03 — the original (pre-Semantic-Model) graph status enum.
+// Superseded by NavigationGraphLifecycleStatus, which drives the canonical
+// Sprint 06 NavigationGraph below. Kept only because LegacyNavigationGraph
+// still references it; not used by any new code.
+enum LegacyGraphStatus {
   DRAFT
   BUILDING
   READY
   PUBLISHED
   ARCHIVED
 
-  @@map("graph_status")
+  @@map("legacy_graph_status")
 }
 
 model SpatialObject {
@@ -203,8 +209,7 @@ model SpatialObject {
   updatedAt  DateTime  @updatedAt @map("updated_at")
   archivedAt DateTime? @map("archived_at")
 
-  blueprint  Blueprint   @relation(fields: [blueprintId], references: [id], onDelete: Cascade)
-  graphNodes GraphNode[]
+  blueprint Blueprint @relation(fields: [blueprintId], references: [id], onDelete: Cascade)
 
   @@index([blueprintId])
   @@index([category])
@@ -214,79 +219,30 @@ model SpatialObject {
   @@map("spatial_objects")
 }
 
-model NavigationGraph {
-  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  blueprintId String      @unique @map("blueprint_id") @db.Uuid
-  version     Int         @default(1)
-  status      GraphStatus @default(DRAFT)
-  generatedAt DateTime?   @map("generated_at")
-  generatedBy String?     @map("generated_by")
-  metadata    Json        @default("{}")
+// Sprint 03 Story 03 — the original geometry-derived navigation graph
+// container, predating ACSM/Geometry/USO/Semantic Model. Kept only because
+// it is still exposed live via POST/GET /api/blueprints/:blueprintId/graph
+// (src/modules/spatial/graph). Its child GraphNode/GraphEdge tables were
+// removed in the Sprint 06 Story 01 refactor: confirmed dead (no service,
+// controller, or route ever created/read a row in either table). Atlas's
+// canonical Navigation Graph is now NavigationGraph below — nothing new
+// should be built on this legacy model.
+model LegacyNavigationGraph {
+  id          String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  blueprintId String            @unique @map("blueprint_id") @db.Uuid
+  version     Int               @default(1)
+  status      LegacyGraphStatus @default(DRAFT)
+  generatedAt DateTime?         @map("generated_at")
+  generatedBy String?           @map("generated_by")
+  metadata    Json              @default("{}")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  blueprint Blueprint   @relation(fields: [blueprintId], references: [id], onDelete: Cascade)
-  nodes     GraphNode[]
-  edges     GraphEdge[]
+  blueprint Blueprint @relation(fields: [blueprintId], references: [id], onDelete: Cascade)
 
   @@index([status])
-  @@map("navigation_graphs")
-}
-
-model GraphNode {
-  id              String                            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  graphId         String                            @map("graph_id") @db.Uuid
-  spatialObjectId String?                           @map("spatial_object_id") @db.Uuid
-  geometry        Unsupported("geometry(Point, 0)")
-  nodeType        String                            @map("node_type")
-  floorLevel      Int                               @map("floor_level")
-  metadata        Json                              @default("{}")
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  graph         NavigationGraph @relation(fields: [graphId], references: [id], onDelete: Cascade)
-  spatialObject SpatialObject?  @relation(fields: [spatialObjectId], references: [id], onDelete: SetNull)
-  edgesFrom     GraphEdge[]     @relation("EdgeFromNode")
-  edgesTo       GraphEdge[]     @relation("EdgeToNode")
-
-  @@index([graphId])
-  @@index([spatialObjectId])
-  @@index([floorLevel])
-  @@index([geometry], type: Gist)
-  @@map("graph_nodes")
-}
-
-model GraphEdge {
-  id            String                                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  graphId       String                                 @map("graph_id") @db.Uuid
-  fromNodeId    String                                 @map("from_node_id") @db.Uuid
-  toNodeId      String                                 @map("to_node_id") @db.Uuid
-  geometry      Unsupported("geometry(LineString, 0)")
-  length        Float?
-  estimatedTime Float?                                 @map("estimated_time")
-  edgeType      String                                 @map("edge_type")
-  accessible    Boolean                                @default(true)
-  oneWay        Boolean                                @default(false) @map("one_way")
-  stairs        Boolean                                @default(false)
-  elevator      Boolean                                @default(false)
-  weight        Float?                                 @default(1)
-  cost          Float?
-  metadata      Json                                   @default("{}")
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  graph    NavigationGraph @relation(fields: [graphId], references: [id], onDelete: Cascade)
-  fromNode GraphNode       @relation("EdgeFromNode", fields: [fromNodeId], references: [id], onDelete: Cascade)
-  toNode   GraphNode       @relation("EdgeToNode", fields: [toNodeId], references: [id], onDelete: Cascade)
-
-  @@index([graphId])
-  @@index([fromNodeId])
-  @@index([toNodeId])
-  @@index([geometry], type: Gist)
-  @@map("graph_edges")
+  @@map("legacy_navigation_graphs")
 }
 
 // Sprint 05 Story 01 — Blueprint Import Pipeline.
@@ -551,8 +507,132 @@ model SemanticModel {
 
   uso UniversalSpatialObject @relation(fields: [usoId], references: [id], onDelete: Cascade)
 
+  navigationNode NavigationNode?
+
   @@index([geometryModelId])
   @@index([lifecycle])
   @@index([semanticCategory])
   @@map("semantic_models")
+}
+
+// Sprint 06 Story 01 — Navigation Graph Domain Model.
+// This is Atlas's single canonical Navigation Graph, derived from the
+// Semantic Model. Persistence-only: no generation, candidate detection,
+// validation algorithms, optimization, or routing logic belongs here (those
+// arrive in later Sprint 06 stories and Sprint 07).
+//
+// Originally named SemanticNavigationGraph/Node/Edge during Story 01 Phase
+// A to avoid colliding with the dormant-but-still-named NavigationGraph/
+// GraphNode/GraphEdge from Sprint 03 Story 03. The Sprint 06 Story 01
+// architectural refactor promoted this to the canonical name: the Sprint 03
+// models were confirmed to have zero foreign-key or code references outside
+// their own group except one live endpoint on the graph container itself
+// (POST/GET /api/blueprints/:blueprintId/graph), which was preserved as
+// LegacyNavigationGraph. GraphNode/GraphEdge were confirmed fully dead
+// (never read or written by any service/controller/route) and removed
+// entirely. See LegacyNavigationGraph above for details.
+enum NavigationGraphLifecycleStatus {
+  CREATED
+  GENERATING
+  VALIDATING
+  READY
+  FAILED
+
+  @@map("navigation_graph_lifecycle_status")
+}
+
+model NavigationGraph {
+  id              String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  buildingId      String                         @map("building_id") @db.Uuid
+  floorId         String?                        @map("floor_id") @db.Uuid
+  status          NavigationGraphLifecycleStatus @default(CREATED)
+  pipelineVersion String                         @map("pipeline_version")
+  metadata        Json                           @default("{}")
+  statistics      Json                           @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  building Building @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  floor    Floor?   @relation(fields: [floorId], references: [id], onDelete: Cascade)
+
+  nodes             NavigationNode[]
+  edges             NavigationEdge[]
+  validationReports GraphValidationReport[]
+
+  @@index([buildingId])
+  @@index([floorId])
+  @@index([status])
+  @@map("navigation_graphs")
+}
+
+model NavigationNode {
+  id               String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  graphId          String @map("graph_id") @db.Uuid
+  semanticObjectId String @unique @map("semantic_object_id") @db.Uuid
+  nodeType         String @map("node_type")
+  position         Json
+  metadata         Json   @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  graph          NavigationGraph @relation(fields: [graphId], references: [id], onDelete: Cascade)
+  semanticObject SemanticModel   @relation(fields: [semanticObjectId], references: [id], onDelete: Cascade)
+
+  edgesAsSource NavigationEdge[] @relation("NavigationEdgeSourceNode")
+  edgesAsTarget NavigationEdge[] @relation("NavigationEdgeTargetNode")
+
+  @@index([graphId])
+  @@index([nodeType])
+  @@map("navigation_nodes")
+}
+
+model NavigationEdge {
+  id            String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  graphId       String @map("graph_id") @db.Uuid
+  sourceNodeId  String @map("source_node_id") @db.Uuid
+  targetNodeId  String @map("target_node_id") @db.Uuid
+  edgeType      String @map("edge_type")
+  length        Float?
+  traversalCost Float  @default(1) @map("traversal_cost")
+  accessibility Json   @default("{}")
+  metadata      Json   @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  graph      NavigationGraph @relation(fields: [graphId], references: [id], onDelete: Cascade)
+  sourceNode NavigationNode  @relation("NavigationEdgeSourceNode", fields: [sourceNodeId], references: [id], onDelete: Cascade)
+  targetNode NavigationNode  @relation("NavigationEdgeTargetNode", fields: [targetNodeId], references: [id], onDelete: Cascade)
+
+  @@index([graphId])
+  @@index([sourceNodeId])
+  @@index([targetNodeId])
+  @@map("navigation_edges")
+}
+
+enum GraphValidationStatus {
+  VALID
+  VALID_WITH_WARNINGS
+  INVALID
+
+  @@map("graph_validation_status")
+}
+
+model GraphValidationReport {
+  id               String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  graphId          String                 @map("graph_id") @db.Uuid
+  validationStatus GraphValidationStatus? @map("validation_status")
+  warnings         Json                   @default("[]")
+  errors           Json                   @default("[]")
+  statistics       Json                   @default("{}")
+  validatedAt      DateTime?              @map("validated_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  graph NavigationGraph @relation(fields: [graphId], references: [id], onDelete: Cascade)
+
+  @@index([graphId])
+  @@map("graph_validation_reports")
 }
