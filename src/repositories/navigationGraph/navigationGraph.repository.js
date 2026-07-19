@@ -21,6 +21,10 @@ function findById(id, client = prisma) {
   return client.navigationGraph.findUnique({ where: { id } });
 }
 
+function update(id, data, client = prisma) {
+  return client.navigationGraph.update({ where: { id }, data });
+}
+
 function deleteById(id, client = prisma) {
   return client.navigationGraph.delete({ where: { id } });
 }
@@ -29,5 +33,6 @@ module.exports = {
   create,
   findAll,
   findById,
+  update,
   deleteById,
 };

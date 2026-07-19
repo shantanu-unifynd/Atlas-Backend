@@ -12,6 +12,8 @@ const geometryRoutes = require("./modules/spatial/processing/geometry/routes/geo
 const usoRoutes = require("./modules/spatial/uso/routes/uso.routes");
 const semanticRoutes = require("./modules/spatial/semantic/routes/semantic.routes");
 const navigationGraphRoutes = require("./modules/navigation/graph/routes/navigationGraph.routes");
+const navigationCandidateRoutes = require("./modules/navigation/candidates/routes/navigationCandidate.routes");
+const navigationNodeRoutes = require("./modules/navigation/nodes/routes/navigationNode.routes");
 const healthRoutes = require("./modules/health/routes/health.routes");
 const errorHandler = require("./common/middlewares/errorHandler");
 
@@ -42,6 +44,8 @@ app.use(
 app.use("/api/geometry/:geometryId", usoRoutes);
 app.use("/api/usos/:usoModelId", semanticRoutes);
 app.use("/api/navigation-graphs", navigationGraphRoutes);
+app.use("/api/navigation-graphs/:graphId/candidates", navigationCandidateRoutes);
+app.use("/api/navigation-graphs/:graphId/nodes", navigationNodeRoutes);
 app.use("/health", healthRoutes);
 
 app.use(errorHandler);

@@ -507,7 +507,8 @@ model SemanticModel {
 
   uso UniversalSpatialObject @relation(fields: [usoId], references: [id], onDelete: Cascade)
 
-  navigationNode NavigationNode?
+  navigationNode       NavigationNode?
+  navigationCandidates NavigationCandidate[]
 
   @@index([geometryModelId])
   @@index([lifecycle])
@@ -556,6 +557,7 @@ model NavigationGraph {
   building Building @relation(fields: [buildingId], references: [id], onDelete: Cascade)
   floor    Floor?   @relation(fields: [floorId], references: [id], onDelete: Cascade)
 
+  candidates        NavigationCandidate[]
   nodes             NavigationNode[]
   edges             NavigationEdge[]
   validationReports GraphValidationReport[]
@@ -566,9 +568,54 @@ model NavigationGraph {
   @@map("navigation_graphs")
 }
 
+// Sprint 06 Story 02 Phase A — Navigation Candidate Detection.
+// Intermediate pipeline artifact: identifies WHERE a navigation node should
+// eventually exist, before any NavigationNode is created (Story 03). Always
+// references a Semantic Object — never Geometry, ACSM, or Blueprint directly.
+// Scoped per-graph (not globally unique on semanticObjectId) so a stale
+// graph can be discarded and candidates regenerated for a fresh graph over
+// the same Semantic Model without a unique-constraint collision.
+enum NavigationCandidateType {
+  ROOM_ENTRY
+  CORRIDOR_INTERSECTION
+  DEAD_END
+  VERTICAL_CONNECTOR
+  BUILDING_ENTRY
+
+  @@map("navigation_candidate_type")
+}
+
+model NavigationCandidate {
+  id               String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  graphId          String                  @map("graph_id") @db.Uuid
+  semanticObjectId String                  @map("semantic_object_id") @db.Uuid
+  candidateType    NavigationCandidateType @map("candidate_type")
+  position         Json                    @default("{}")
+  confidence       Float                   @default(1.0)
+  metadata         Json                    @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  graph          NavigationGraph @relation(fields: [graphId], references: [id], onDelete: Cascade)
+  semanticObject SemanticModel   @relation(fields: [semanticObjectId], references: [id], onDelete: Cascade)
+
+  navigationNode NavigationNode?
+
+  @@unique([graphId, semanticObjectId])
+  @@index([graphId])
+  @@index([candidateType])
+  @@map("navigation_candidates")
+}
+
+// Sprint 06 Story 03 — Navigation Node Generation.
+// Strict 1:1 with the NavigationCandidate it was generated from (never
+// merged, never split) — candidateId is unique to enforce that at the DB
+// level. Deterministic transformation only: nodeType/position/metadata are
+// inherited verbatim from the candidate, never recomputed or reclassified.
 model NavigationNode {
   id               String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   graphId          String @map("graph_id") @db.Uuid
+  candidateId      String @unique @map("candidate_id") @db.Uuid
   semanticObjectId String @unique @map("semantic_object_id") @db.Uuid
   nodeType         String @map("node_type")
   position         Json
@@ -577,8 +624,9 @@ model NavigationNode {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  graph          NavigationGraph @relation(fields: [graphId], references: [id], onDelete: Cascade)
-  semanticObject SemanticModel   @relation(fields: [semanticObjectId], references: [id], onDelete: Cascade)
+  graph          NavigationGraph     @relation(fields: [graphId], references: [id], onDelete: Cascade)
+  candidate      NavigationCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  semanticObject SemanticModel       @relation(fields: [semanticObjectId], references: [id], onDelete: Cascade)
 
   edgesAsSource NavigationEdge[] @relation("NavigationEdgeSourceNode")
   edgesAsTarget NavigationEdge[] @relation("NavigationEdgeTargetNode")
