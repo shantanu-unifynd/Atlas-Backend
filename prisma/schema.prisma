@@ -654,6 +654,7 @@ model NavigationEdge {
   sourceNode NavigationNode  @relation("NavigationEdgeSourceNode", fields: [sourceNodeId], references: [id], onDelete: Cascade)
   targetNode NavigationNode  @relation("NavigationEdgeTargetNode", fields: [targetNodeId], references: [id], onDelete: Cascade)
 
+  @@unique([graphId, sourceNodeId, targetNodeId])
   @@index([graphId])
   @@index([sourceNodeId])
   @@index([targetNodeId])

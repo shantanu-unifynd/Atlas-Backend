@@ -13,6 +13,13 @@ function findAllByGraphId(graphId, client = prisma) {
   });
 }
 
+function findLatestByGraphId(graphId, client = prisma) {
+  return client.graphValidationReport.findFirst({
+    where: { graphId },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
 function findById(id, client = prisma) {
   if (!UUID_REGEX.test(id)) {
     return null;
@@ -28,6 +35,7 @@ function deleteById(id, client = prisma) {
 module.exports = {
   create,
   findAllByGraphId,
+  findLatestByGraphId,
   findById,
   deleteById,
 };

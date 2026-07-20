@@ -6,6 +6,10 @@ function create(data, client = prisma) {
   return client.navigationEdge.create({ data });
 }
 
+function createMany(records, client = prisma) {
+  return client.navigationEdge.createMany({ data: records });
+}
+
 function findAllByGraphId(graphId, client = prisma) {
   return client.navigationEdge.findMany({
     where: { graphId },
@@ -31,6 +35,7 @@ function deleteById(id, client = prisma) {
 
 module.exports = {
   create,
+  createMany,
   findAllByGraphId,
   findById,
   update,
