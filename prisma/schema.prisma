@@ -561,6 +561,7 @@ model NavigationGraph {
   nodes             NavigationNode[]
   edges             NavigationEdge[]
   validationReports GraphValidationReport[]
+  routes            Route[]
 
   @@index([buildingId])
   @@index([floorId])
@@ -631,6 +632,12 @@ model NavigationNode {
   edgesAsSource NavigationEdge[] @relation("NavigationEdgeSourceNode")
   edgesAsTarget NavigationEdge[] @relation("NavigationEdgeTargetNode")
 
+  routesAsOrigin      Route[] @relation("RouteOriginNode")
+  routesAsDestination Route[] @relation("RouteDestinationNode")
+
+  routeSegmentsAsSource RouteSegment[] @relation("RouteSegmentSourceNode")
+  routeSegmentsAsTarget RouteSegment[] @relation("RouteSegmentTargetNode")
+
   @@index([graphId])
   @@index([nodeType])
   @@map("navigation_nodes")
@@ -684,4 +691,83 @@ model GraphValidationReport {
 
   @@index([graphId])
   @@map("graph_validation_reports")
+}
+
+// Sprint 07 Story 01 — Route Domain.
+// Establishes the persistence model that later Sprint 07 stories (Cost
+// Model, Dijkstra, Route Builder, Route Validation) will populate. This
+// story is domain-only: no traversal, no edge inspection, no path
+// computation. A Route is a temporary computation result scoped to one
+// NavigationGraph — not a persistent spatial asset — so every child row
+// cascades away with its Route.
+enum RouteLifecycleStatus {
+  GENERATING
+  READY
+  FAILED
+
+  @@map("route_lifecycle_status")
+}
+
+model Route {
+  id                String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  graphId           String               @map("graph_id") @db.Uuid
+  originNodeId      String               @map("origin_node_id") @db.Uuid
+  destinationNodeId String               @map("destination_node_id") @db.Uuid
+  status            RouteLifecycleStatus @default(GENERATING)
+  metadata          Json                 @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  graph           NavigationGraph @relation(fields: [graphId], references: [id], onDelete: Cascade)
+  originNode      NavigationNode  @relation("RouteOriginNode", fields: [originNodeId], references: [id], onDelete: Cascade)
+  destinationNode NavigationNode  @relation("RouteDestinationNode", fields: [destinationNodeId], references: [id], onDelete: Cascade)
+
+  segments   RouteSegment[]
+  statistics RouteStatistics?
+
+  @@index([graphId])
+  @@index([originNodeId])
+  @@index([destinationNodeId])
+  @@index([status])
+  @@map("routes")
+}
+
+// Empty on creation (Story 01). Future Story 04 (Route Builder) populates
+// one row per traversed Navigation Node pair, in path order via `sequence`.
+model RouteSegment {
+  id           String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  routeId      String @map("route_id") @db.Uuid
+  sourceNodeId String @map("source_node_id") @db.Uuid
+  targetNodeId String @map("target_node_id") @db.Uuid
+  sequence     Int
+  metadata     Json   @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  route      Route          @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  sourceNode NavigationNode @relation("RouteSegmentSourceNode", fields: [sourceNodeId], references: [id], onDelete: Cascade)
+  targetNode NavigationNode @relation("RouteSegmentTargetNode", fields: [targetNodeId], references: [id], onDelete: Cascade)
+
+  @@unique([routeId, sequence])
+  @@index([routeId])
+  @@map("route_segments")
+}
+
+// Deliberately independent from RouteSegment (per spec): a single JSON blob
+// rather than derived-on-read aggregates, so future stories can add metrics
+// (distance, travel time, floor transitions, etc.) without a schema
+// redesign — mirrors the NavigationGraph.statistics / GraphValidationReport
+// .statistics precedent from Sprint 06. Empty on creation (Story 01).
+model RouteStatistics {
+  id         String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  routeId    String @unique @map("route_id") @db.Uuid
+  statistics Json   @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  route Route @relation(fields: [routeId], references: [id], onDelete: Cascade)
+
+  @@map("route_statistics")
 }

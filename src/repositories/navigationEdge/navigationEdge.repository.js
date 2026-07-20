@@ -29,6 +29,20 @@ function update(id, data, client = prisma) {
   return client.navigationEdge.update({ where: { id }, data });
 }
 
+function updateManyByGraphId(graphId, data, client = prisma) {
+  return client.navigationEdge.updateMany({ where: { graphId }, data });
+}
+
+function aggregateCostsByGraphId(graphId, client = prisma) {
+  return client.navigationEdge.aggregate({
+    where: { graphId },
+    _count: { _all: true },
+    _min: { traversalCost: true },
+    _max: { traversalCost: true },
+    _avg: { traversalCost: true },
+  });
+}
+
 function deleteById(id, client = prisma) {
   return client.navigationEdge.delete({ where: { id } });
 }
@@ -39,5 +53,7 @@ module.exports = {
   findAllByGraphId,
   findById,
   update,
+  updateManyByGraphId,
+  aggregateCostsByGraphId,
   deleteById,
 };

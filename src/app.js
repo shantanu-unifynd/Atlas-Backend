@@ -16,6 +16,11 @@ const navigationCandidateRoutes = require("./modules/navigation/candidates/route
 const navigationNodeRoutes = require("./modules/navigation/nodes/routes/navigationNode.routes");
 const navigationEdgeRoutes = require("./modules/navigation/edges/routes/navigationEdge.routes");
 const graphValidationRoutes = require("./modules/navigation/validation/routes/graphValidation.routes");
+const routeRoutes = require("./modules/routing/route/routes/route.routes");
+const costModelRoutes = require("./modules/navigation/costs/routes/costModel.routes");
+const routingRoutes = require("./modules/navigation/routing/routes/routing.routes");
+const routeBuilderRoutes = require("./modules/navigation/routes/routes/routeBuilder.routes");
+const routeValidationRoutes = require("./modules/navigation/routes/validation/routes/routeValidation.routes");
 const healthRoutes = require("./modules/health/routes/health.routes");
 const errorHandler = require("./common/middlewares/errorHandler");
 
@@ -50,6 +55,11 @@ app.use("/api/navigation-graphs/:graphId/candidates", navigationCandidateRoutes)
 app.use("/api/navigation-graphs/:graphId/nodes", navigationNodeRoutes);
 app.use("/api/navigation-graphs/:graphId/edges", navigationEdgeRoutes);
 app.use("/api/navigation-graphs/:graphId", graphValidationRoutes);
+app.use("/api/routes", routeRoutes);
+app.use("/api/routes", routeBuilderRoutes);
+app.use("/api/routes", routeValidationRoutes);
+app.use("/api/navigation-graphs/:graphId/costs", costModelRoutes);
+app.use("/api/navigation-graphs/:graphId/routes", routingRoutes);
 app.use("/health", healthRoutes);
 
 app.use(errorHandler);
