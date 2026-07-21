@@ -562,6 +562,7 @@ model NavigationGraph {
   edges             NavigationEdge[]
   validationReports GraphValidationReport[]
   routes            Route[]
+  routingContexts   RoutingContext[]
 
   @@index([buildingId])
   @@index([floorId])
@@ -770,4 +771,41 @@ model RouteStatistics {
   route Route @relation(fields: [routeId], references: [id], onDelete: Cascade)
 
   @@map("route_statistics")
+}
+
+// Sprint 08 Story 01 — Routing Context Domain.
+// Establishes the runtime context that will accompany every future routing
+// request — WHAT the requester wants (a routing preference), not HOW that
+// preference gets applied to costs (Story 02) or used in routing (Story
+// 03). Deliberately minimal: exactly the 5 fields specified, no
+// placeholder columns for future position/device/sensor/crowd/AR/emergency
+// data — those are explicit future-sprint concerns and would violate this
+// story's "no future-story logic" constraint if added now. Independent of
+// the Route domain: a RoutingContext configures how a route WOULD be
+// computed, so it references only NavigationGraph, never Route/
+// RouteSegment/RouteStatistics.
+enum RoutingPreference {
+  SHORTEST
+  FASTEST
+  ACCESSIBLE
+  AVOID_STAIRS
+  PREFER_ELEVATORS
+
+  @@map("routing_preference")
+}
+
+model RoutingContext {
+  id         String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  graphId    String            @map("graph_id") @db.Uuid
+  preference RoutingPreference
+  metadata   Json              @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  graph NavigationGraph @relation(fields: [graphId], references: [id], onDelete: Cascade)
+
+  @@index([graphId])
+  @@index([preference])
+  @@map("routing_contexts")
 }
