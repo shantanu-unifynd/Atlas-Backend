@@ -23,6 +23,7 @@ const routeBuilderRoutes = require("./modules/navigation/routes/routes/routeBuil
 const routeValidationRoutes = require("./modules/navigation/routes/validation/routes/routeValidation.routes");
 const routingContextRoutes = require("./modules/routing/context/routes/routingContext.routes");
 const costPolicyRoutes = require("./modules/routing/costPolicy/routes/costPolicy.routes");
+const preferenceRoutingRoutes = require("./modules/routing/preferenceRouting/routes/preferenceRouting.routes");
 const healthRoutes = require("./modules/health/routes/health.routes");
 const errorHandler = require("./common/middlewares/errorHandler");
 
@@ -64,6 +65,7 @@ app.use("/api/navigation-graphs/:graphId/costs", costModelRoutes);
 app.use("/api/navigation-graphs/:graphId/routes", routingRoutes);
 app.use("/api/routing-contexts", routingContextRoutes);
 app.use("/api/routing-contexts/:contextId/costs", costPolicyRoutes);
+app.use("/api/routing-contexts/:contextId/route", preferenceRoutingRoutes);
 app.use("/health", healthRoutes);
 
 app.use(errorHandler);
