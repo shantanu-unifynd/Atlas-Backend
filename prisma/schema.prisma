@@ -726,6 +726,7 @@ model Route {
 
   segments   RouteSegment[]
   statistics RouteStatistics?
+  sessions   NavigationSession[]
 
   @@index([graphId])
   @@index([originNodeId])
@@ -808,4 +809,46 @@ model RoutingContext {
   @@index([graphId])
   @@index([preference])
   @@map("routing_contexts")
+}
+
+// Sprint 09 Story 01 — Navigation Session Domain.
+// Pure persistence, exactly like RoutingContext (Sprint 08 Story 01): a
+// thin runtime entity with no business logic. A NavigationSession
+// represents ONE execution of an immutable Route — a Route may have many
+// sessions (one per user attempt), so this references routeId only, never
+// graphId/routingContextId directly (those are reachable transitively
+// through the Route it belongs to). `state` defaults to CREATED and is
+// never set explicitly by this story's create endpoint — lifecycle
+// transitions (Start/Pause/Resume/Cancel/Complete) belong entirely to
+// Story 02, exactly as Route's own `status` defaults to GENERATING and is
+// only ever advanced by later Sprint 07 stories, never by Route's own
+// Story 01 create call. No progress fields (current segment/node, visited
+// nodes, remaining distance/time), no event log — those are Story 03 and
+// Story 04 concerns and would violate this story's "no placeholder
+// columns" constraint if added now.
+enum NavigationSessionState {
+  CREATED
+  READY
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+
+  @@map("navigation_session_state")
+}
+
+model NavigationSession {
+  id       String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  routeId  String                 @map("route_id") @db.Uuid
+  state    NavigationSessionState @default(CREATED)
+  metadata Json                   @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  route Route @relation(fields: [routeId], references: [id], onDelete: Cascade)
+
+  @@index([routeId])
+  @@index([state])
+  @@map("navigation_sessions")
 }
