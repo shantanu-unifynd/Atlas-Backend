@@ -563,6 +563,7 @@ model NavigationGraph {
   validationReports GraphValidationReport[]
   routes            Route[]
   routingContexts   RoutingContext[]
+  positions         Position[]
 
   @@index([buildingId])
   @@index([floorId])
@@ -851,4 +852,41 @@ model NavigationSession {
   @@index([routeId])
   @@index([state])
   @@map("navigation_sessions")
+}
+
+// Sprint 10 Story 01 — Position Domain.
+// Pure persistence, exactly like NavigationGraph/Route/RoutingContext/
+// NavigationSession Story 01s: a thin runtime entity with no business
+// logic. Represents ONE normalized position reading produced by any
+// Position Provider (Story 02) — it must never know about the Navigation
+// Runtime, Routing, Dijkstra, Route, Session Progress, or Events, so it
+// references only NavigationGraph (topology, not runtime) as its spatial
+// anchor, never Route or NavigationSession.
+//
+// `source` is a plain string, not an enum: enumerating BLE/WiFi/UWB/QR/
+// VisualSLAM/GPS/Mock now would be exactly the speculative commitment
+// this story forbids, since the actual provider framework belongs to
+// Story 02. `coordinates` is a generic JSON payload (mirrors the existing
+// NavigationNode.position Json convention) so it never presupposes a
+// specific shape (x/y/z vs lat/lng vs nodeId) ahead of any real non-mock
+// provider existing. `recordedAt` is distinct from `createdAt`: a
+// position reading has an inherent "moment it was true" separate from
+// "moment it was persisted" — foundational to what a position observation
+// is, not a speculative future-provider field.
+model Position {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  graphId     String   @map("graph_id") @db.Uuid
+  source      String
+  coordinates Json
+  recordedAt  DateTime @default(now()) @map("recorded_at")
+  metadata    Json     @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  graph NavigationGraph @relation(fields: [graphId], references: [id], onDelete: Cascade)
+
+  @@index([graphId])
+  @@index([source])
+  @@map("positions")
 }
