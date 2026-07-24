@@ -32,6 +32,9 @@ const sessionProgressRoutes = require("./modules/navigation/session/progress/rou
 const navigationEventRoutes = require("./modules/navigation/session/events/routes/navigationEvent.routes");
 const navigationSessionValidationRoutes = require("./modules/navigation/session/validation/routes/navigationSessionValidation.routes");
 const positionRoutes = require("./modules/positioning/position/routes/position.routes");
+const positionProviderRoutes = require("./modules/positioning/provider/routes/positionProvider.routes");
+const positionRuntimeRoutes = require("./modules/positioning/runtime/routes/positionRuntime.routes");
+const positionValidationRoutes = require("./modules/positioning/validation/routes/positionValidation.routes");
 const healthRoutes = require("./modules/health/routes/health.routes");
 const errorHandler = require("./common/middlewares/errorHandler");
 
@@ -81,7 +84,10 @@ app.use("/api/navigation-sessions", sessionLifecycleRoutes);
 app.use("/api/navigation-sessions", sessionProgressRoutes);
 app.use("/api/navigation-sessions", navigationEventRoutes);
 app.use("/api/navigation-sessions", navigationSessionValidationRoutes);
+app.use("/api/positions", positionProviderRoutes);
 app.use("/api/positions", positionRoutes);
+app.use("/api/navigation-sessions", positionRuntimeRoutes);
+app.use("/api/navigation-sessions", positionValidationRoutes);
 app.use("/health", healthRoutes);
 
 app.use(errorHandler);
