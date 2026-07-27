@@ -42,7 +42,10 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
-
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path}`);
+  next();
+});
 app.use("/api/buildings", buildingRoutes);
 app.use("/api/buildings/:buildingId/floors", floorRoutes);
 app.use("/api/floors/:floorId/assets", assetRoutes);

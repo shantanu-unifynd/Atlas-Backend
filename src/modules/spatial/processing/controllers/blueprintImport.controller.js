@@ -51,8 +51,36 @@ async function getImportById(req, res, next) {
   }
 }
 
+// Deliberately bypasses the standard {success, message, data} JSON
+// envelope — this endpoint serves the raw file bytes so the frontend can
+// render them directly (e.g. an <img> or inline SVG), not JSON metadata.
+// Cache-Control is safe to set as long-lived/immutable because each
+// upload creates a new versioned import row — an importId's file content
+// never changes after creation.
+async function getImportFile(req, res, next) {
+  try {
+    const { buffer, mimeType, checksum } = await blueprintImportService.getImportFile(
+      req.params.buildingId,
+      req.params.floorId,
+      req.params.importId
+    );
+
+    res.set("Content-Type", mimeType);
+    res.set("Content-Length", buffer.length);
+    res.set("Cache-Control", "public, max-age=31536000, immutable");
+    if (checksum) {
+      res.set("ETag", `"${checksum}"`);
+    }
+
+    return res.send(buffer);
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   importBlueprint,
   getImports,
   getImportById,
+  getImportFile,
 };

@@ -27,6 +27,7 @@ function toBlueprintImport(record) {
     metadata: record.metadata,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
+    fileUrl: `/api/buildings/${record.buildingId}/floors/${record.floorId}/blueprint-imports/${record.id}/file`,
   });
 }
 
@@ -130,8 +131,31 @@ async function getImportById(buildingId, floorId, importId) {
   return toBlueprintImport(record);
 }
 
+async function getImportFile(buildingId, floorId, importId) {
+  await ensureBuildingExists(buildingId);
+  await ensureFloorExists(buildingId, floorId);
+
+  const record = await blueprintImportRepository.findById(importId);
+
+  if (!record || record.floorId !== floorId) {
+    const error = new Error("Blueprint import not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const buffer = await storage.read(record.storageKey);
+
+  return {
+    buffer,
+    mimeType: record.mimeType,
+    filename: record.originalFilename,
+    checksum: record.checksum,
+  };
+}
+
 module.exports = {
   importBlueprint,
   getImportsByFloorId,
   getImportById,
+  getImportFile,
 };

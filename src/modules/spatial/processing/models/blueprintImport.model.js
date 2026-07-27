@@ -14,6 +14,7 @@ class BlueprintImport {
     metadata,
     createdAt,
     updatedAt,
+    fileUrl,
   }) {
     this.id = id;
     this.buildingId = buildingId;
@@ -29,6 +30,7 @@ class BlueprintImport {
     this.metadata = metadata;
     this.createdAt = createdAt;
     this.updatedAt = updatedAt;
+    this.fileUrl = fileUrl;
   }
 }
 
