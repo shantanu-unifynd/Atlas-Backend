@@ -610,26 +610,42 @@ model NavigationCandidate {
   @@map("navigation_candidates")
 }
 
+// Distinguishes how a node came to exist. AUTO nodes are produced by the
+// deterministic candidate→node pipeline (Sprint 06 Story 03) and stay locked
+// 1:1 to a candidate + semantic object. MANUAL nodes are hand-placed by an
+// admin in the human-assisted authoring flow — they have no candidate or
+// semantic backing (hence the nullable FKs below), only a hand-set position.
+enum NavigationNodeSource {
+  AUTO
+  MANUAL
+
+  @@map("navigation_node_source")
+}
+
 // Sprint 06 Story 03 — Navigation Node Generation.
-// Strict 1:1 with the NavigationCandidate it was generated from (never
-// merged, never split) — candidateId is unique to enforce that at the DB
-// level. Deterministic transformation only: nodeType/position/metadata are
-// inherited verbatim from the candidate, never recomputed or reclassified.
+// AUTO nodes are strict 1:1 with the NavigationCandidate they were generated
+// from (never merged, never split) — candidateId is unique to enforce that at
+// the DB level. Deterministic transformation only: nodeType/position/metadata
+// are inherited verbatim from the candidate, never recomputed or reclassified.
+// MANUAL nodes (human-assisted authoring) carry null candidateId/
+// semanticObjectId; Postgres treats NULLs as distinct, so the @unique
+// constraints still block duplicate AUTO nodes while allowing many MANUAL ones.
 model NavigationNode {
-  id               String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  graphId          String @map("graph_id") @db.Uuid
-  candidateId      String @unique @map("candidate_id") @db.Uuid
-  semanticObjectId String @unique @map("semantic_object_id") @db.Uuid
-  nodeType         String @map("node_type")
+  id               String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  graphId          String               @map("graph_id") @db.Uuid
+  candidateId      String?              @unique @map("candidate_id") @db.Uuid
+  semanticObjectId String?              @unique @map("semantic_object_id") @db.Uuid
+  source           NavigationNodeSource @default(AUTO)
+  nodeType         String               @map("node_type")
   position         Json
-  metadata         Json   @default("{}")
+  metadata         Json                 @default("{}")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  graph          NavigationGraph     @relation(fields: [graphId], references: [id], onDelete: Cascade)
-  candidate      NavigationCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-  semanticObject SemanticModel       @relation(fields: [semanticObjectId], references: [id], onDelete: Cascade)
+  graph          NavigationGraph      @relation(fields: [graphId], references: [id], onDelete: Cascade)
+  candidate      NavigationCandidate? @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  semanticObject SemanticModel?       @relation(fields: [semanticObjectId], references: [id], onDelete: Cascade)
 
   edgesAsSource NavigationEdge[] @relation("NavigationEdgeSourceNode")
   edgesAsTarget NavigationEdge[] @relation("NavigationEdgeTargetNode")

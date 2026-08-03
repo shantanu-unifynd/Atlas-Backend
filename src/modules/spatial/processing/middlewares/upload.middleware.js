@@ -6,7 +6,7 @@ const multer = require("multer");
 // not enforced here.
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 },
+  limits: { fileSize: 50 * 1024 * 1024 },
 });
 
 module.exports = upload;

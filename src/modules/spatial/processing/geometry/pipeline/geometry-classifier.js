@@ -127,6 +127,37 @@ function classifyWallsAndPassages(cleanedGeometry, topology) {
   return { candidateWalls, candidatePassages };
 }
 
+// Pairs a component's dangling (open) endpoints into individual gaps via
+// greedy nearest-neighbour matching: the two closest open ends form one
+// doorway, then the next two, and so on. A component with a single gap has
+// two dangling ends -> one pair (identical to the original single-opening
+// behaviour); a room with N doorways has 2N dangling ends -> N pairs, so
+// EVERY doorway on a room is now detected. The previous "exactly two
+// dangling ends per component" rule found zero doorways the moment a room
+// had more than one — which meant navigation nodes could never connect
+// (Sprint 06). An odd leftover end (malformed geometry) is left unpaired.
+function pairDanglingEnds(dangling) {
+  const remaining = [...dangling];
+  const pairs = [];
+
+  while (remaining.length >= 2) {
+    let best = null;
+
+    for (let i = 0; i < remaining.length; i += 1) {
+      for (let j = i + 1; j < remaining.length; j += 1) {
+        const d = distance(remaining[i], remaining[j]);
+        if (!best || d < best.distance) best = { i, j, distance: d };
+      }
+    }
+
+    pairs.push([remaining[best.i], remaining[best.j]]);
+    remaining.splice(best.j, 1);
+    remaining.splice(best.i, 1);
+  }
+
+  return pairs;
+}
+
 function classifyOpenings(topology, candidateBoundaries) {
   const closedComponentKeys = new Set(
     candidateBoundaries
@@ -145,12 +176,22 @@ function classifyOpenings(topology, candidateBoundaries) {
     );
     const dangling = componentNodes.filter((node) => node.degree === 1);
 
-    if (dangling.length === 2) {
+    for (const [endA, endB] of pairDanglingEnds(dangling)) {
+      // Record the two wall segments flanking the gap. Without primitiveIds
+      // the Stage 5 relationship-builder (which keys every relationship on
+      // primitiveIds) silently excludes every opening — so a DOORWAY could
+      // never gain a CONNECTS neighbour. gapNodeIds still describes the gap
+      // itself; primitiveIds are the primitives owning the two gap ends (the
+      // door jambs), so the opening now touches whatever those walls touch.
+      const primitiveIds = [...new Set([...endA.sharedBy, ...endB.sharedBy])];
+
       candidateOpenings.push({
         id: `opening-${candidateOpenings.length}`,
+        source: "component-gap",
+        primitiveIds,
         componentId: component.id,
-        gapNodeIds: [dangling[0].id, dangling[1].id],
-        gapWidth: distance(dangling[0], dangling[1]),
+        gapNodeIds: [endA.id, endB.id],
+        gapWidth: distance(endA, endB),
       });
     }
   }

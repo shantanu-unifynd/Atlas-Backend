@@ -54,10 +54,20 @@ function notFoundError() {
 }
 
 async function createNavigationGraph(data) {
-  const { buildingId, floorId, metadata } = data;
+  const { buildingId, floorId, metadata, mode } = data;
 
   if (!buildingId) {
     const error = new Error("buildingId is required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // Human-assisted authoring: a graph created with mode "MANUAL" is populated
+  // by hand (manual node/edge endpoints) instead of the auto candidate→node→
+  // edge pipeline. The flag lives in metadata (no schema change); it is
+  // advisory — it does not itself block or invoke any pipeline stage.
+  if (mode !== undefined && mode !== "AUTO" && mode !== "MANUAL") {
+    const error = new Error('mode must be either "AUTO" or "MANUAL"');
     error.statusCode = 400;
     throw error;
   }
@@ -72,7 +82,10 @@ async function createNavigationGraph(data) {
     buildingId,
     floorId: floorId || null,
     pipelineVersion: PIPELINE_VERSION,
-    metadata: metadata || {},
+    metadata: {
+      ...(metadata || {}),
+      ...(mode ? { mode } : {}),
+    },
   });
 
   return toNavigationGraph(record);

@@ -1,3 +1,4 @@
+const { Prisma } = require("@prisma/client");
 const blueprintImportRepository = require("../../../../repositories/blueprintImport/blueprintImport.repository");
 const normalizedBlueprintRepository = require("../../../../repositories/normalizedBlueprint/normalizedBlueprint.repository");
 const buildingRepository = require("../../../../repositories/building/building.repository");
@@ -93,6 +94,12 @@ async function readStoredFile(blueprintImport) {
   }
 }
 
+function conflictError() {
+  const error = new Error("This blueprint import has already been normalized");
+  error.statusCode = 409;
+  return error;
+}
+
 async function normalizeBlueprintImport(buildingId, floorId, importId) {
   await ensureBuildingExists(buildingId);
   await ensureFloorExists(buildingId, floorId);
@@ -109,6 +116,15 @@ async function normalizeBlueprintImport(buildingId, floorId, importId) {
     throw error;
   }
 
+  // Checked up front so a repeat call never touches blueprintImport's status
+  // at all — the import already succeeded once; this is a conflict, not a
+  // new failure of this attempt.
+  const existing = await normalizedBlueprintRepository.findByBlueprintImportId(importId);
+
+  if (existing) {
+    throw conflictError();
+  }
+
   await blueprintImportRepository.update(blueprintImport.id, { status: "VALIDATING" });
 
   try {
@@ -117,15 +133,28 @@ async function normalizeBlueprintImport(buildingId, floorId, importId) {
     const parsed = parserEntry.parse(rawText);
     const acsm = normalizeToAcsm(parsed);
 
-    const record = await normalizedBlueprintRepository.create({
-      blueprintImportId: blueprintImport.id,
-      sourceFormat: parserEntry.sourceFormat,
-      coordinateSystem: acsm.coordinateSystem,
-      bounds: acsm.bounds,
-      layers: acsm.layers,
-      elements: acsm.elements,
-      relationships: acsm.relationships,
-    });
+    let record;
+
+    try {
+      record = await normalizedBlueprintRepository.create({
+        blueprintImportId: blueprintImport.id,
+        sourceFormat: parserEntry.sourceFormat,
+        coordinateSystem: acsm.coordinateSystem,
+        bounds: acsm.bounds,
+        layers: acsm.layers,
+        elements: acsm.elements,
+        relationships: acsm.relationships,
+      });
+    } catch (createError) {
+      if (createError instanceof Prisma.PrismaClientKnownRequestError && createError.code === "P2002") {
+        // Lost a race against a concurrent normalize call for the same
+        // import — the other request already succeeded, so this is a
+        // conflict too, not a failure of this attempt.
+        throw conflictError();
+      }
+
+      throw createError;
+    }
 
     await blueprintImportRepository.update(blueprintImport.id, {
       status: "NORMALIZED",
@@ -134,6 +163,12 @@ async function normalizeBlueprintImport(buildingId, floorId, importId) {
 
     return toNormalizedBlueprint(record, blueprintImport);
   } catch (error) {
+    if (error.statusCode === 409) {
+      // Not a processing failure — leave blueprintImport's status untouched
+      // (it is already correctly NORMALIZED from the original call).
+      throw error;
+    }
+
     await blueprintImportRepository.update(blueprintImport.id, {
       status: "FAILED",
       errorMessage: error.message,

@@ -4,6 +4,7 @@ class NavigationNode {
     graphId,
     candidateId,
     semanticObjectId,
+    source,
     nodeType,
     position,
     metadata,
@@ -14,6 +15,7 @@ class NavigationNode {
     this.graphId = graphId;
     this.candidateId = candidateId;
     this.semanticObjectId = semanticObjectId;
+    this.source = source;
     this.nodeType = nodeType;
     this.position = position;
     this.metadata = metadata;

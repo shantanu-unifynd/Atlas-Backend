@@ -48,12 +48,18 @@ async function loadNodesForGraph(graphId) {
 
   const usoIds = [...usoIdToNode.keys()];
 
+  // CONNECTS where EITHER side backs a node — not only both. Nav nodes are
+  // doorways, and two doorways into the same room don't touch each other
+  // (so they never share a direct doorway-doorway CONNECTS); they each
+  // CONNECTS the room. Loading the room-side connections lets the edge
+  // generator link two doorways that share a room (edge Change 2). A
+  // connection where both sides are node-USOs is still handled as a direct
+  // edge.
   const connections = usoIds.length
     ? await prisma.universalSpatialObjectRelationship.findMany({
         where: {
           relationshipType: "CONNECTS",
-          sourceUsoId: { in: usoIds },
-          targetUsoId: { in: usoIds },
+          OR: [{ sourceUsoId: { in: usoIds } }, { targetUsoId: { in: usoIds } }],
         },
       })
     : [];

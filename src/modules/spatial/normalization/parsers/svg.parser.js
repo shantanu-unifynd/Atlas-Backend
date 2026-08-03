@@ -12,12 +12,31 @@ function attributesOf(node) {
   return node[":@"] || {};
 }
 
-function textContentOf(children) {
-  const textNode = (children || []).find(
-    (child) => Object.keys(child).length === 1 && Object.prototype.hasOwnProperty.call(child, "#text")
-  );
+// Gathers a <text> element's string content, including text nested inside
+// <tspan> (and any deeper) children — SVG editors routinely wrap label text in
+// tspans, so reading only a direct #text child dropped most labels entirely.
+function collectText(children) {
+  let out = "";
 
-  return textNode ? textNode["#text"] : undefined;
+  for (const child of children || []) {
+    if (Object.prototype.hasOwnProperty.call(child, "#text")) {
+      out += String(child["#text"]);
+      continue;
+    }
+
+    const tag = Object.keys(child).find((key) => key !== ":@");
+
+    if (tag && Array.isArray(child[tag])) {
+      out += ` ${collectText(child[tag])}`;
+    }
+  }
+
+  return out;
+}
+
+function textContentOf(children) {
+  const text = collectText(children).replace(/\s+/g, " ").trim();
+  return text === "" ? undefined : text;
 }
 
 function walk(children, currentLayerId, elements) {
