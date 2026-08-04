@@ -60,11 +60,58 @@ model Floor {
   blueprint        Blueprint?
   blueprintImports BlueprintImport[]
   navigationGraphs NavigationGraph[]
+  mapPresentationModels MapPresentationModel[]
+  mapRoomOverrides MapRoomOverride[]
 
   @@unique([buildingId, level])
   @@index([buildingId])
   @@index([status])
   @@map("floors")
+}
+
+// Map Presentation Model (MPM) — a render-ready, versioned, floor-scoped view
+// derived from the spatial/semantic pipeline for the client to draw. MPM-01
+// stores the framework envelope (metadata + placeholders + navigation graph
+// output) in `data`; room/wall/label geometry is filled by later stories.
+// navigationGraphId is a loose reference (no FK relation) to the graph whose
+// output was embedded.
+model MapPresentationModel {
+  id                String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  floorId           String  @map("floor_id") @db.Uuid
+  version           Int
+  status            String  @default("GENERATED")
+  navigationGraphId String? @map("navigation_graph_id") @db.Uuid
+  data              Json    @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  floor Floor @relation(fields: [floorId], references: [id], onDelete: Cascade)
+
+  @@unique([floorId, version])
+  @@index([floorId])
+  @@map("map_presentation_models")
+}
+
+// MPM-05 — admin-authored room corrections, persisted SEPARATELY from generated
+// MPM data. During MPM generation these are merged in with source=MANUAL, taking
+// precedence over a generated room via optional replacesRoomId.
+model MapRoomOverride {
+  id             String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  floorId        String  @map("floor_id") @db.Uuid
+  name           String?
+  category       String?
+  polygon        Json
+  area           Float?
+  replacesRoomId String? @map("replaces_room_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  floor Floor @relation(fields: [floorId], references: [id], onDelete: Cascade)
+
+  @@index([floorId])
+  @@map("map_room_overrides")
 }
 
 model Asset {
