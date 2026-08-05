@@ -13,6 +13,7 @@ const { normalizeGeometry } = require("../pipeline/coordinate-normalizer");
 const { assembleRooms } = require("../pipeline/room-assembler");
 const { extractWalls, extractOpenings, extractLabels } = require("../pipeline/feature-extractor");
 const mapRoomOverrideRepository = require("../../../../repositories/mapRoomOverride/mapRoomOverride.repository");
+const { canTransition, GENERATED, PUBLISHED } = require("../pipeline/lifecycle");
 
 // MPM-01 — framework only. Assembles the model envelope: metadata + version +
 // floor reference + placeholders (rooms/walls/labels) + the existing navigation
@@ -201,13 +202,50 @@ async function generate(floorId) {
   return toModel(record);
 }
 
-async function getByFloorId(floorId) {
+async function getByFloorId(floorId, { published = false } = {}) {
   await ensureFloorExists(floorId);
 
-  const record = await mapPresentationModelRepository.findLatestByFloorId(floorId);
+  // Default (backward compatible): the latest version, whatever its status.
+  // published=true: the floor's single live (published) version.
+  const record = published
+    ? await mapPresentationModelRepository.findLatestPublishedByFloorId(floorId)
+    : await mapPresentationModelRepository.findLatestByFloorId(floorId);
   if (!record) {
+    throw notFoundError(
+      published
+        ? "No published map presentation model for this floor"
+        : "Map presentation model has not been generated for this floor"
+    );
+  }
+
+  return toModel(record);
+}
+
+// --- Sprint 07A: publish workflow ---
+
+// Publish the floor's latest MPM version. Enforces the lifecycle guard (only a
+// GENERATED draft can be published) and the single-published invariant (any
+// previously published version is archived first). Version history is untouched
+// — publishing only flips statuses, it never regenerates or deletes rows.
+async function publish(floorId) {
+  await ensureFloorExists(floorId);
+
+  const target = await mapPresentationModelRepository.findLatestByFloorId(floorId);
+  if (!target) {
     throw notFoundError("Map presentation model has not been generated for this floor");
   }
+
+  if (!canTransition(target.status, PUBLISHED)) {
+    throw validationError(
+      `Cannot publish version ${target.version}: a map model in status '${target.status}' cannot transition to ${PUBLISHED}. ` +
+        `Only a ${GENERATED} draft can be published — regenerate to create a new draft first.`
+    );
+  }
+
+  // Single-published invariant: supersede the current live version (if any),
+  // then promote the target. Superseded rows stay as history (status ARCHIVED).
+  await mapPresentationModelRepository.archivePublishedByFloorId(floorId);
+  const record = await mapPresentationModelRepository.updateStatus(target.id, PUBLISHED);
 
   return toModel(record);
 }
@@ -318,6 +356,7 @@ async function listRoomOverrides(floorId) {
 module.exports = {
   generate,
   getByFloorId,
+  publish,
   createRoomOverride,
   updateRoomOverride,
   deleteRoomOverride,

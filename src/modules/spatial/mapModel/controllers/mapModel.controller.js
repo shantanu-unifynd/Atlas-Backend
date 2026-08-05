@@ -16,10 +16,26 @@ async function generateMapModel(req, res, next) {
 
 async function getMapModel(req, res, next) {
   try {
-    const model = await mapModelService.getByFloorId(req.params.floorId);
+    // Sprint 07A — ?published=true returns the single live version; otherwise
+    // the latest version (unchanged default behavior).
+    const published = req.query.published === "true";
+    const model = await mapModelService.getByFloorId(req.params.floorId, { published });
     return successResponse(res, {
       statusCode: 200,
       message: "Map presentation model fetched successfully",
+      data: model,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function publishMapModel(req, res, next) {
+  try {
+    const model = await mapModelService.publish(req.params.floorId);
+    return successResponse(res, {
+      statusCode: 200,
+      message: "Map presentation model published successfully",
       data: model,
     });
   } catch (error) {
@@ -66,6 +82,7 @@ async function deleteRoomOverride(req, res, next) {
 module.exports = {
   generateMapModel,
   getMapModel,
+  publishMapModel,
   listRoomOverrides,
   createRoomOverride,
   updateRoomOverride,
