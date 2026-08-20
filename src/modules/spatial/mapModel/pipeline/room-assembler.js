@@ -9,6 +9,37 @@ const { regularizeRing } = require("./polygon-regularizer");
 const MIN_AREA = 25; // world-unit^2 — drop specks/degenerate rings
 const EPS = 0.05;
 
+// BXP-06 — likely building/floor envelope exclusion, authored-closed-
+// primitive candidates only. Threshold derived from BXP-05's calibration
+// (73 real candidates across 12 floors: confirmed envelopes >=76.4%,
+// legitimate candidates <=26.4% — a clean, empty gap in between) and
+// BXP-05.1's stress test (a legitimate ~40%-of-floor anchor store measured
+// at 40.38%, safely below this line). 50 sits in the middle of that gap.
+// Do not raise/lower without new calibration evidence, same as MIN_AREA.
+const ENVELOPE_POLY_AREA_PERCENT = 50;
+
+// Bounding box of every primitive's segments in the floor — the same
+// "overall floor geometry bbox" measure BXP-04/05 used, computed once per
+// assembleRooms() call rather than per-candidate.
+function overallGeometryBbox(primitives) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const primitive of primitives) {
+    for (const s of primitive.segments || []) {
+      minX = Math.min(minX, s.x1, s.x2);
+      maxX = Math.max(maxX, s.x1, s.x2);
+      minY = Math.min(minY, s.y1, s.y2);
+      maxY = Math.max(maxY, s.y1, s.y2);
+    }
+  }
+
+  if (!Number.isFinite(minX) || !Number.isFinite(maxX)) return 0;
+  return (maxX - minX) * (maxY - minY);
+}
+
 function samePoint(a, b) {
   return Math.abs(a.x - b.x) < EPS && Math.abs(a.y - b.y) < EPS;
 }
@@ -187,6 +218,7 @@ function assembleRooms({ primitives, boundaries, nodes, usoByCandidateId, semant
   const rooms = [];
   const usedNodeIds = new Set();
   let polygonCount = 0;
+  const floorBboxArea = overallGeometryBbox(primitives);
 
   for (const boundary of boundaries) {
     // BXP-02: regularize immediately after the ring is assembled and before
@@ -202,6 +234,17 @@ function assembleRooms({ primitives, boundaries, nodes, usoByCandidateId, semant
     if (hasSelfIntersection(ring)) continue;
     const area = shoelaceArea(ring);
     if (area < MIN_AREA) continue;
+    // BXP-06 — likely building/floor envelope exclusion. Origin is read
+    // directly from the boundary's own source field (set upstream by
+    // topology-builder.js/geometry-classifier.js — "primitive" for an
+    // authored-closed-primitive boundary, "component-cycle" for a face-
+    // extracted one), never inferred from area: only an authored closed
+    // primitive can produce this artifact (BXP-04's finding), so face-
+    // extracted rooms are exempt from this check entirely.
+    if (boundary.source === "primitive" && floorBboxArea > 0) {
+      const polyAreaPercent = (area / floorBboxArea) * 100;
+      if (polyAreaPercent > ENVELOPE_POLY_AREA_PERCENT) continue;
+    }
     polygonCount += 1;
 
     const uso = usoByCandidateId.get(boundary.id) || null;

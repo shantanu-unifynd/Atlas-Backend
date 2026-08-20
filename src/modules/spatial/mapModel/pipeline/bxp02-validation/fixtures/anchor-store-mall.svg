@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 200" width="260" height="200">
+  <!-- BXP-05.1 stress fixture: a legitimately large anchor store (~40% of
+       the floor's overall content bbox) alongside 5 normal smaller shops.
+       No outer envelope primitive is included -- floor bbox here is
+       defined purely by content extent, same measurement basis BXP-05 used. -->
+  <rect x="0" y="0" width="150" height="140" />      <!-- anchor store: 21000 -->
+  <rect x="160" y="0" width="60" height="60" />       <!-- shop 1: 3600 -->
+  <rect x="160" y="70" width="60" height="70" />      <!-- shop 2: 4200 -->
+  <rect x="0" y="150" width="80" height="50" />       <!-- shop 3: 4000 -->
+  <rect x="90" y="150" width="80" height="50" />      <!-- shop 4: 4000 -->
+  <rect x="180" y="150" width="80" height="50" />     <!-- shop 5: 4000 -->
+</svg>
