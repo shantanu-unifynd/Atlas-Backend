@@ -160,71 +160,163 @@ function computeConnectedComponents(cleanedGeometry, nodes, touchingPairs) {
   }));
 }
 
-// Cycle detection via the node-edge graph ALONE (never via touching pairs):
-// touching connects two primitives spatially without necessarily sharing a
-// graph node, so mixing it into the edges-vs-nodes cycle test would produce
-// false negatives (a real cycle diluted by an unrelated dangling touch).
-// For a connected graph, edges >= nodes is a standard sufficient condition
-// for a cycle to exist (a spanning tree has exactly nodes - 1 edges).
-function computeNodeGraphCycles(nodes, edges) {
-  const parent = new Map(nodes.map((n) => [n.id, n.id]));
-
-  function find(id) {
-    if (parent.get(id) !== id) parent.set(id, find(parent.get(id)));
-    return parent.get(id);
-  }
-
-  function union(a, b) {
-    const rootA = find(a);
-    const rootB = find(b);
-    if (rootA !== rootB) parent.set(rootA, rootB);
-  }
-
-  for (const edge of edges) {
-    union(edge.fromNodeId, edge.toNodeId);
-  }
-
-  const groups = new Map();
-
-  for (const node of nodes) {
-    const root = find(node.id);
-    if (!groups.has(root)) groups.set(root, { nodeIds: new Set(), edgeCount: 0, primitiveIds: new Set() });
-    groups.get(root).nodeIds.add(node.id);
-  }
-
-  for (const edge of edges) {
-    const group = groups.get(find(edge.fromNodeId));
-    group.edgeCount += 1;
-    group.primitiveIds.add(edge.primitiveId);
-  }
-
-  const cycles = [];
-  let index = 0;
-
-  for (const group of groups.values()) {
-    // primitiveIds.size > 1 excludes a single closed primitive (rect,
-    // polygon, ...) re-reporting itself — that's already captured below as
-    // a "primitive" boundary. This branch is specifically for a cycle
-    // formed by several distinct open primitives sharing endpoints.
-    if (group.primitiveIds.size > 1 && group.edgeCount >= group.nodeIds.size) {
-      cycles.push({
-        type: "component-cycle",
-        componentId: `node-component-${index}`,
-        primitiveIds: [...group.primitiveIds],
-        nodeIds: [...group.nodeIds],
-      });
-    }
-
-    index += 1;
-  }
-
-  return cycles;
+// BXP-01 — planar face extraction, replacing the old whole-component cycle
+// check. The old computeNodeGraphCycles() treated an ENTIRE connected wall
+// mesh as one single boundary candidate the moment it contained a cycle
+// anywhere, then handed it to a ring-tracer that gave up completely the
+// instant any node had degree != 2 — which is every T-junction and every
+// wall shared between two rooms. A real building's walls are one big
+// connected mesh full of exactly that, so the whole mesh produced zero
+// rooms. This is a classical planar-graph face-walk instead: build directed
+// half-edges, and at each vertex always take the next edge in a fixed
+// angular rotation order relative to the one just arrived on. Every
+// directed half-edge belongs to exactly one face this way, so it correctly
+// decomposes a connected mesh into one bounded face per enclosed room —
+// including at T-junctions and higher-degree junctions — instead of
+// bailing on them.
+function angleBetween(a, b) {
+  return Math.atan2(b.y - a.y, b.x - a.x);
 }
 
-// Closed boundaries come from two sources: primitives that are inherently
-// closed (rect, polygon, circle, ellipse, a path ending in Z), and cycles
-// found in the node-edge graph, i.e. several separate open primitives
-// (e.g. 4 lines) forming a closed loop by sharing endpoints.
+// For every node, its neighbors sorted by angle (ascending). Kept per-edge
+// (not per-neighbor-id) so two parallel edges between the same pair of
+// nodes — e.g. two overlapping wall primitives — are each their own
+// half-edge rather than being collapsed into one.
+function buildSortedAdjacency(nodes, edges) {
+  const adjacency = new Map(nodes.map((n) => [n.id, []]));
+  const nodesById = new Map(nodes.map((n) => [n.id, n]));
+
+  for (const edge of edges) {
+    const from = nodesById.get(edge.fromNodeId);
+    const to = nodesById.get(edge.toNodeId);
+
+    if (!from || !to || from.id === to.id) continue;
+
+    adjacency.get(from.id).push({ neighborId: to.id, edgeId: edge.id, angle: angleBetween(from, to) });
+    adjacency.get(to.id).push({ neighborId: from.id, edgeId: edge.id, angle: angleBetween(to, from) });
+  }
+
+  for (const list of adjacency.values()) {
+    list.sort((a, b) => a.angle - b.angle);
+  }
+
+  return adjacency;
+}
+
+function signedShoelaceArea(points) {
+  let sum = 0;
+
+  for (let i = 0; i < points.length; i += 1) {
+    const p1 = points[i];
+    const p2 = points[(i + 1) % points.length];
+    sum += p1.x * p2.y - p2.x * p1.y;
+  }
+
+  return sum / 2;
+}
+
+// Walks every directed half-edge exactly once, grouping them into closed
+// face cycles. A vertex with only one neighbor (a dangling wall stub, or an
+// unpaired doorway-gap end) simply reflects the walk straight back the way
+// it came, rather than blocking it — that naturally produces a degenerate
+// zero-area "face" for the stub instead of a crash or a stuck trace, and
+// traceInteriorFaces() below filters those out by area, not by special-
+// casing dead ends here.
+function traceAllFaces(nodes, edges) {
+  const adjacency = buildSortedAdjacency(nodes, edges);
+  const nodesById = new Map(nodes.map((n) => [n.id, n]));
+  const visited = new Set();
+  const halfEdgeKey = (fromId, toId, edgeId) => `${fromId}=>${toId}#${edgeId}`;
+  const maxSteps = edges.length * 2 + 4;
+
+  const faces = [];
+
+  for (const startEdge of edges) {
+    for (const [startFrom, startTo] of [
+      [startEdge.fromNodeId, startEdge.toNodeId],
+      [startEdge.toNodeId, startEdge.fromNodeId],
+    ]) {
+      if (startFrom === startTo || visited.has(halfEdgeKey(startFrom, startTo, startEdge.id))) continue;
+
+      const nodeIds = [];
+      const edgeIds = [];
+      let fromId = startFrom;
+      let toId = startTo;
+      let edgeId = startEdge.id;
+      let steps = 0;
+      let closedProperly = false;
+
+      while (steps < maxSteps) {
+        visited.add(halfEdgeKey(fromId, toId, edgeId));
+        nodeIds.push(fromId);
+        edgeIds.push(edgeId);
+        steps += 1;
+
+        const neighborsAtTo = adjacency.get(toId) || [];
+        const reverseIndex = neighborsAtTo.findIndex((n) => n.neighborId === fromId && n.edgeId === edgeId);
+
+        if (reverseIndex === -1 || neighborsAtTo.length === 0) break;
+
+        const next = neighborsAtTo[(reverseIndex + 1) % neighborsAtTo.length];
+        const nextFrom = toId;
+        const nextTo = next.neighborId;
+        const nextEdgeId = next.edgeId;
+
+        if (nextFrom === startFrom && nextTo === startTo && nextEdgeId === startEdge.id) {
+          closedProperly = true;
+          break;
+        }
+
+        fromId = nextFrom;
+        toId = nextTo;
+        edgeId = nextEdgeId;
+      }
+
+      if (!closedProperly || nodeIds.length < 3) continue;
+
+      const points = nodeIds.map((id) => nodesById.get(id));
+
+      faces.push({ nodeIds, edgeIds, points, signedArea: signedShoelaceArea(points) });
+    }
+  }
+
+  return faces;
+}
+
+// The traversal rule above assigns a consistent winding to every face in
+// the whole graph: empirically confirmed (bxp01-validation/validate-bxp01.js,
+// run against a fixture with a known 4-room ground truth) every bounded
+// (interior/room) face comes out with a NEGATIVE signed area under "always
+// take the next neighbor in ascending-angle order" combined with SVG's
+// y-down coordinate system, while the unbounded exterior face comes out
+// positive — e.g. for a simple isolated square this rule traces the room
+// itself as -10000 and the exterior as +10000. Degenerate dangling-stub
+// walks land at (near) zero either way. Filtering on sign, rather than
+// "largest area per component," needs no connected-component bookkeeping
+// at all and still correctly handles multiple disconnected wall clusters
+// on the same floor.
+const MIN_INTERIOR_FACE_AREA = 1e-6;
+
+function traceInteriorFaces(nodes, edges) {
+  return traceAllFaces(nodes, edges).filter((face) => face.signedArea < -MIN_INTERIOR_FACE_AREA);
+}
+
+// Closed boundaries come from two sources: any primitive the author drew as
+// its OWN closed shape (rect, polygon, circle, ellipse, or a path ending in
+// Z) is trusted as its own room boundary unconditionally, regardless of
+// what it touches — exactly as before BXP-01. Real floor plans are commonly
+// authored this way: each room is its own independently-closed path, and
+// adjacent rooms' paths often coincide exactly at shared walls, which used
+// to make the whole floor one connected component. Face-tracing every
+// closed primitive unconditionally (BXP-01's first cut) decomposed that
+// merged mesh into a handful of wrong, oversized regions instead of the
+// individually-authored rooms — a regression found validating against a
+// real building (57 independently-closed rooms collapsed to 13 wrong
+// faces). Face extraction is scoped to only the OPEN (non-self-closed)
+// primitives' segments instead — the actual shared-wall-network case it was
+// built to fix (T-junctions and multi-way junctions among walls that were
+// never closed shapes to begin with) — leaving every independently-closed
+// room exactly as authored, matching the old behavior for them.
 function computeClosedBoundaries(cleanedGeometry, nodes, edges) {
   const closedBoundaries = [];
 
@@ -234,7 +326,25 @@ function computeClosedBoundaries(cleanedGeometry, nodes, edges) {
     }
   }
 
-  closedBoundaries.push(...computeNodeGraphCycles(nodes, edges));
+  const primitiveById = new Map(cleanedGeometry.map((p) => [p.id, p]));
+  const openEdges = edges.filter((edge) => {
+    const primitive = primitiveById.get(edge.primitiveId);
+    return primitive && !primitive.closed;
+  });
+
+  const edgeById = new Map(openEdges.map((e) => [e.id, e]));
+  const faces = traceInteriorFaces(nodes, openEdges);
+
+  faces.forEach((face, index) => {
+    const primitiveIds = [...new Set(face.edgeIds.map((edgeId) => edgeById.get(edgeId).primitiveId))];
+
+    closedBoundaries.push({
+      type: "component-cycle",
+      componentId: `face-${index}`,
+      primitiveIds,
+      nodeIds: face.nodeIds,
+    });
+  });
 
   return closedBoundaries;
 }

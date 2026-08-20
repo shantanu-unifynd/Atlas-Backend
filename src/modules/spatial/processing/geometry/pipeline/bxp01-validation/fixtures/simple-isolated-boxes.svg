@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 150" width="300" height="150">
+  <!-- Regression fixture: two isolated rooms with nothing touching, the
+       same shape the old degree-2 ring-tracer already handled correctly
+       (and the "primitive"/isolated-4-line-loop path both old and new
+       topology-builder must keep producing identically). -->
+  <rect x="10" y="10" width="100" height="100" />
+  <line x1="150" y1="10" x2="250" y2="10" />
+  <line x1="250" y1="10" x2="250" y2="110" />
+  <line x1="250" y1="110" x2="150" y2="110" />
+  <line x1="150" y1="110" x2="150" y2="10" />
+</svg>

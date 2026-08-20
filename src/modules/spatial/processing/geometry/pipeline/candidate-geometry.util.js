@@ -96,46 +96,38 @@ function distance(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-// Traces a simple closed ring through a set of node ids using only the
-// given edges. Returns null (rather than guessing) if any node in the set
-// doesn't have exactly degree 2 within the induced subgraph — i.e. the
-// topology branches, and there's no single unambiguous ring to trace.
+// BXP-01 — nodeIds now arrives already ordered into a valid closed ring,
+// traced upstream by topology-builder.js's real planar face extraction
+// (see traceInteriorFaces there). The old version here re-derived ring
+// order itself from an unordered node set and gave up the instant any node
+// had degree != 2 in that induced subgraph — i.e. any T-junction or shared
+// wall — which is exactly why a connected multi-room mesh used to produce
+// zero rooms. There's nothing left to re-derive; this just materializes the
+// known-ordered ids into points, still defensively confirming (rather than
+// assuming) that each consecutive pair really is connected by a real edge,
+// so a malformed upstream ring is caught here instead of silently rendered.
 function traceRing(nodeIds, edges, nodesById) {
-  const nodeIdSet = new Set(nodeIds);
-  const adjacency = new Map(nodeIds.map((id) => [id, []]));
+  if (!Array.isArray(nodeIds) || nodeIds.length < 3) {
+    return null;
+  }
 
-  for (const edge of edges) {
-    if (nodeIdSet.has(edge.fromNodeId) && nodeIdSet.has(edge.toNodeId)) {
-      adjacency.get(edge.fromNodeId).push(edge.toNodeId);
-      adjacency.get(edge.toNodeId).push(edge.fromNodeId);
+  const ring = nodeIds.map((id) => nodesById.get(id));
+
+  if (ring.some((node) => !node)) {
+    return null;
+  }
+
+  const connected = new Set(edges.map((edge) => `${edge.fromNodeId}|${edge.toNodeId}`));
+  const isEdge = (a, b) => connected.has(`${a}|${b}`) || connected.has(`${b}|${a}`);
+
+  for (let i = 0; i < nodeIds.length; i += 1) {
+    const next = nodeIds[(i + 1) % nodeIds.length];
+    if (!isEdge(nodeIds[i], next)) {
+      return null;
     }
   }
 
-  if ([...adjacency.values()].some((neighbors) => neighbors.length !== 2)) {
-    return null;
-  }
-
-  const start = nodeIds[0];
-  const ring = [start];
-  let previous = null;
-  let current = start;
-
-  do {
-    const neighbors = adjacency.get(current);
-    const next = neighbors[0] === previous ? neighbors[1] : neighbors[0];
-
-    if (next === start) break;
-
-    ring.push(next);
-    previous = current;
-    current = next;
-  } while (ring.length <= nodeIds.length);
-
-  if (ring.length !== nodeIds.length) {
-    return null;
-  }
-
-  return ring.map((id) => nodesById.get(id));
+  return ring;
 }
 
 module.exports = {

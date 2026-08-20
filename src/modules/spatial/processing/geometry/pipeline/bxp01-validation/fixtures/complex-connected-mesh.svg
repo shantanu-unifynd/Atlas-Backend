@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- BXP-01 complex fixture: a 2x2 grid of 4 rooms sharing walls with the
+       building's outer perimeter and with each other via a central cross.
+       Ground truth: 4 bounded rooms, each 100x100 = 10000 sq units.
+
+       Junctions:
+         (0,0) (200,0) (200,200) (0,200)  -> degree 2, plain corners
+         (100,0) (200,100) (100,200) (0,100) -> degree 3, T-junctions
+         (100,100)                          -> degree 4, center junction
+
+       This is exactly the shape the old algorithm could not handle: the
+       whole mesh is one connected component, so it collapsed to a single
+       "component-cycle" boundary, which then failed traceRing() at every
+       junction above (all degree != 2) and produced zero rooms. -->
+
+  <!-- Outer perimeter, split into 8 segments at the T-junctions -->
+  <line x1="0" y1="0" x2="100" y2="0" />
+  <line x1="100" y1="0" x2="200" y2="0" />
+  <line x1="200" y1="0" x2="200" y2="100" />
+  <line x1="200" y1="100" x2="200" y2="200" />
+  <line x1="200" y1="200" x2="100" y2="200" />
+  <line x1="100" y1="200" x2="0" y2="200" />
+  <line x1="0" y1="200" x2="0" y2="100" />
+  <line x1="0" y1="100" x2="0" y2="0" />
+
+  <!-- Internal cross, split into 4 segments meeting at the center -->
+  <line x1="100" y1="100" x2="100" y2="0" />
+  <line x1="100" y1="100" x2="100" y2="200" />
+  <line x1="100" y1="100" x2="0" y2="100" />
+  <line x1="100" y1="100" x2="200" y2="100" />
+</svg>
