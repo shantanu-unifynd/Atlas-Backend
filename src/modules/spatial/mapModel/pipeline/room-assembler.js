@@ -28,6 +28,49 @@ function centroidOf(pts) {
   return { x: Math.round((c.x / pts.length) * 100) / 100, y: Math.round((c.y / pts.length) * 100) / 100 };
 }
 
+// BXP-01.4 — reject (never repair) a self-intersecting assembled ring.
+// Same check used to discover this gap during BXP-03's evaluation, moved
+// here as the production validity gate rather than living only in a
+// one-off evaluation script. Strict proper-crossing test: two segments
+// intersect only if each straddles the other (opposite-sign cross products
+// on both sides), so segments that merely touch at a shared endpoint or
+// are collinear are not flagged — only a genuine crossing is.
+//
+// Edge i is (points[i] -> points[(i+1) % n]). Two edges are "adjacent" (and
+// therefore skipped, never compared) when they share a polygon vertex:
+// edge i vs edge i+1 always share points[i+1], and — because the ring is
+// closed — edge 0 vs the last edge always share points[0]/points[n-1]. The
+// `Math.abs(i - j) <= 1` check catches the former; `i === 0 && j === n - 1`
+// catches the wraparound closing-edge case explicitly.
+function hasSelfIntersection(points) {
+  const n = points.length;
+
+  function cross(o, a, b) {
+    return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  }
+
+  function segmentsCross(p1, p2, p3, p4) {
+    const d1 = cross(p3, p4, p1);
+    const d2 = cross(p3, p4, p2);
+    const d3 = cross(p1, p2, p3);
+    const d4 = cross(p1, p2, p4);
+    return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+  }
+
+  for (let i = 0; i < n; i += 1) {
+    for (let j = i + 1; j < n; j += 1) {
+      const adjacent = Math.abs(i - j) <= 1 || (i === 0 && j === n - 1);
+      if (adjacent) continue;
+
+      if (segmentsCross(points[i], points[(i + 1) % n], points[j], points[(j + 1) % n])) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 function pointInPolygon(pt, pts) {
   let inside = false;
   for (let i = 0, j = pts.length - 1; i < pts.length; j = i, i += 1) {
@@ -152,6 +195,11 @@ function assembleRooms({ primitives, boundaries, nodes, usoByCandidateId, semant
     // extracted, and before room/MPM assembly consumes it.
     const ring = regularizeRing(ringFromBoundary(boundary, primitivesById));
     if (ring.length < 3) continue;
+    // BXP-01.4 — detection and rejection only: a self-intersecting ring is
+    // never repaired, split, or reordered, just excluded from the accepted
+    // room output entirely, same as the existing too-few-points/too-small
+    // rejections above and below it.
+    if (hasSelfIntersection(ring)) continue;
     const area = shoelaceArea(ring);
     if (area < MIN_AREA) continue;
     polygonCount += 1;
@@ -204,4 +252,4 @@ function assembleRooms({ primitives, boundaries, nodes, usoByCandidateId, semant
   };
 }
 
-module.exports = { assembleRooms };
+module.exports = { assembleRooms, hasSelfIntersection };
