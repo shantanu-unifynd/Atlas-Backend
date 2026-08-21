@@ -52,8 +52,29 @@ async function generateCandidates(req, res, next) {
   }
 }
 
+// BXP-09 — explicit regeneration, distinct action from generateCandidates.
+// Same params, same response shape; only the underlying service behavior
+// (rebuild-and-replace vs one-shot-guarded) differs.
+async function regenerateCandidates(req, res, next) {
+  try {
+    const geometryModel = await geometryService.regenerateCandidates(
+      req.params.buildingId,
+      req.params.floorId,
+      req.params.importId
+    );
+    return successResponse(res, {
+      statusCode: 200,
+      message: "Candidate geometry regenerated successfully",
+      data: geometryModel,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   extractGeometry,
   getGeometryModel,
   generateCandidates,
+  regenerateCandidates,
 };

@@ -190,8 +190,70 @@ async function generateCandidates(buildingId, floorId, importId) {
   return toGeometryModel(updated, acsm.metadata);
 }
 
+// BXP-09 — explicit, narrowly-scoped regeneration. Unlike generateCandidates
+// (Phase C's one-shot enrichment, which reclassifies the ALREADY-PERSISTED
+// record.topology and refuses to run twice), this rebuilds topology itself
+// from the already-persisted cleanedGeometry using the CURRENT topology-
+// builder before reclassifying — the only way an existing GeometryModel can
+// benefit from later extraction-algorithm fixes (e.g. BXP-01's face
+// extraction) without weakening generateCandidates()'s guard for normal
+// first-time callers. Never touches primitives/cleanedGeometry (Phase B
+// output), never re-reads the ACSM/SVG, never touches any other floor's
+// records, and has no effect on MapPresentationModel/MapRoomOverride rows.
+// Reachable only via its own explicit route — normal generateCandidates()
+// behavior is completely unchanged by this addition.
+async function regenerateCandidates(buildingId, floorId, importId) {
+  const acsm = await normalizationService.getAcsm(buildingId, floorId, importId);
+
+  const record = await geometryModelRepository.findByNormalizedBlueprintId(acsm.id);
+
+  if (!record) {
+    const error = new Error("Geometry model not found for this blueprint import");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const topology = buildTopology(record.cleanedGeometry);
+  const { candidateObjects, warnings } = classifyGeometry(record.cleanedGeometry, topology);
+  const relationships = buildRelationships(candidateObjects, record.cleanedGeometry, topology);
+
+  const regeneratedAt = new Date().toISOString();
+
+  const diagnostics = {
+    ...record.diagnostics,
+    topologyNodeCount: topology.nodes.length,
+    topologyEdgeCount: topology.edges.length,
+    connectedComponents: topology.connectedComponents.length,
+    closedBoundaries: topology.closedBoundaries.length,
+    candidateCount: countCandidates(candidateObjects),
+    relationshipCount: relationships.length,
+    boundaryCount: candidateObjects.candidateBoundaries.length,
+    enclosureCount: candidateObjects.candidateEnclosures.length,
+    wallCount: candidateObjects.candidateWalls.length,
+    openingCount: candidateObjects.candidateOpenings.length,
+    passageCount: candidateObjects.candidatePassages.length,
+    verticalConnectionCount: candidateObjects.candidateVerticalConnections.length,
+    candidatesGeneratedAt: regeneratedAt,
+    // Audit trail distinct from candidatesGeneratedAt (which always reflects
+    // only the CURRENT candidates' timestamp) -- this accumulates every
+    // explicit regeneration this GeometryModel has ever gone through.
+    regenerationHistory: [...(record.diagnostics.regenerationHistory || []), regeneratedAt],
+    warnings: [...record.diagnostics.warnings, ...warnings],
+  };
+
+  const updated = await geometryModelRepository.update(record.id, {
+    topology,
+    candidateObjects,
+    relationships,
+    diagnostics,
+  });
+
+  return toGeometryModel(updated, acsm.metadata);
+}
+
 module.exports = {
   extractGeometry,
   getGeometryModel,
   generateCandidates,
+  regenerateCandidates,
 };
