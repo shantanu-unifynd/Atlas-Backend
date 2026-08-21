@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 410 210" width="410" height="210">
+  <!-- BXP-08 isolated end-to-end test fixture.
+
+       Left block (0,0)-(300,200): a 3x2 grid of 6 rooms (100x100 each,
+       area 10000) built ONLY from open <line> wall segments sharing
+       endpoints -- exactly the connected/shared-wall topology BXP-01's
+       face extraction exists to resolve. Segments are deliberately split
+       at every junction (never passing through one uninterrupted), and
+       roughly half are authored in a reversed direction relative to the
+       others -- arbitrary segment direction, on purpose, to stress
+       BXP-01.3's cursor-based orientation matching.
+
+       Junction census:
+         (0,0) (300,0) (300,200) (0,200)              -> degree 2, plain corners
+         (100,0) (200,0) (100,200) (200,200)
+         (0,100) (300,100)                             -> degree 3, T-junctions (6 total)
+         (100,100) (200,100)                           -> degree 4, cross junctions (2 total)
+
+       Right block: two disjoint CLOSED authored rooms (rect + polygon),
+       physically separated from the mesh (gap at x=300..310) so they form
+       their own connected component(s) -- exercises BXP-01.1's mixed
+       representation rule: authored-closed primitives are trusted
+       unconditionally and never face-traced, regardless of what open
+       geometry exists elsewhere on the same floor.
+
+       Ground truth (derived, not measured yet):
+         6 face-extracted rooms (component-cycle) @ area 10000 each
+         2 authored-closed rooms (primitive) @ area 10000 each
+         = 8 expected candidate boundaries / assembled rooms.
+       Floor bbox = 410 x 210 = 86100; each room's polyArea% ~= 11.6%,
+       well under the 50% BXP-06 envelope threshold -- no exclusions
+       expected. -->
+
+  <!-- Top edge (y=0), split at x=100 and x=200 -->
+  <line x1="100" y1="0" x2="0" y2="0" />
+  <line x1="100" y1="0" x2="200" y2="0" />
+  <line x1="300" y1="0" x2="200" y2="0" />
+
+  <!-- Bottom edge (y=200), split at x=100 and x=200 -->
+  <line x1="0" y1="200" x2="100" y2="200" />
+  <line x1="200" y1="200" x2="100" y2="200" />
+  <line x1="200" y1="200" x2="300" y2="200" />
+
+  <!-- Left edge (x=0), split at y=100 -->
+  <line x1="0" y1="100" x2="0" y2="0" />
+  <line x1="0" y1="100" x2="0" y2="200" />
+
+  <!-- Right edge (x=300), split at y=100 -->
+  <line x1="300" y1="0" x2="300" y2="100" />
+  <line x1="300" y1="200" x2="300" y2="100" />
+
+  <!-- Internal vertical divider at x=100, split at y=100 -->
+  <line x1="100" y1="100" x2="100" y2="0" />
+  <line x1="100" y1="100" x2="100" y2="200" />
+
+  <!-- Internal vertical divider at x=200, split at y=100 -->
+  <line x1="200" y1="0" x2="200" y2="100" />
+  <line x1="200" y1="200" x2="200" y2="100" />
+
+  <!-- Internal horizontal divider at y=100, split at x=100 and x=200 -->
+  <line x1="0" y1="100" x2="100" y2="100" />
+  <line x1="200" y1="100" x2="100" y2="100" />
+  <line x1="200" y1="100" x2="300" y2="100" />
+
+  <!-- Disjoint closed authored room 1: a <rect> (closed:true by construction) -->
+  <rect x="310" y="0" width="100" height="100" />
+
+  <!-- Disjoint closed authored room 2: a <polygon> (closed:true by construction) -->
+  <polygon points="310,110 410,110 410,210 310,210" />
+</svg>
