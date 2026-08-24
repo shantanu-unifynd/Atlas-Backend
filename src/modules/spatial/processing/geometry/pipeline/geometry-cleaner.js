@@ -20,28 +20,42 @@ function cleanGeometry(primitives) {
       continue;
     }
 
-    if (isZeroLength(primitive.type, parsed.geometry, parsed.segments)) {
-      removed.invalid.push({ id: primitive.id, type: primitive.type, reason: "zero-length or degenerate geometry" });
-      continue;
-    }
+    // BXP-12 — a <path> may decompose into multiple independent subpaths;
+    // primitiveToGeometry returns an array of geometry entries for "path"
+    // (one per subpath, even when there's only one), a single object for
+    // every other type. Normalize to a list so the rest of this loop
+    // doesn't need to know which.
+    const parsedEntries = Array.isArray(parsed) ? parsed : [parsed];
 
-    const key = geometryKey(primitive.type, primitive.layer, parsed.geometry);
+    parsedEntries.forEach((entry, index) => {
+      // Only multi-subpath paths get a suffixed id — the common case (one
+      // subpath, or any non-path primitive) keeps its original element id
+      // unchanged.
+      const id = parsedEntries.length > 1 ? `${primitive.id}-sub${index}` : primitive.id;
 
-    if (seenKeys.has(key)) {
-      removed.duplicates.push({ id: primitive.id, type: primitive.type, reason: "duplicate of an earlier primitive in the same layer" });
-      continue;
-    }
+      if (isZeroLength(primitive.type, entry.geometry, entry.segments)) {
+        removed.invalid.push({ id, type: primitive.type, reason: "zero-length or degenerate geometry" });
+        return;
+      }
 
-    seenKeys.add(key);
+      const key = geometryKey(primitive.type, primitive.layer, entry.geometry);
 
-    cleaned.push({
-      id: primitive.id,
-      type: primitive.type,
-      layer: primitive.layer,
-      ...(primitive.text !== undefined ? { text: primitive.text } : {}),
-      geometry: parsed.geometry,
-      segments: parsed.segments,
-      closed: parsed.closed,
+      if (seenKeys.has(key)) {
+        removed.duplicates.push({ id, type: primitive.type, reason: "duplicate of an earlier primitive in the same layer" });
+        return;
+      }
+
+      seenKeys.add(key);
+
+      cleaned.push({
+        id,
+        type: primitive.type,
+        layer: primitive.layer,
+        ...(primitive.text !== undefined ? { text: primitive.text } : {}),
+        geometry: entry.geometry,
+        segments: entry.segments,
+        closed: entry.closed,
+      });
     });
   }
 

@@ -52,24 +52,46 @@ function parsePoints(pointsString) {
 
 // Minimal SVG path `d` parser: fully interprets M/L/H/V/Z, and approximates
 // curve commands (C/S/Q/T/A) by a straight segment to their endpoint.
+//
+// BXP-12 — a `d` string may contain multiple independent SUBPATHS: every
+// M/m command (not just the very first one in the whole string) starts a
+// fresh subpath, per the SVG spec, with no line drawn connecting it to
+// wherever the previous subpath left off. The previous version of this
+// function only special-cased the first "m" ever seen; every subsequent
+// M/m was wrongly treated as a line-to, chaining unrelated shapes (e.g.
+// dozens of small hatch marks) into one giant, self-crossing ring. This
+// now returns an ARRAY of { segments, closed } — one entry per subpath —
+// each with its OWN independently-tracked closed flag (a path can mix
+// closed and open subpaths; each is judged only by its own Z/z).
+//
+// Per the SVG spec, only the FIRST coordinate pair of an M/m command
+// starts a new subpath; any additional coordinate pairs within that same
+// command are implicit line-tos. That distinction (the `i === 0` check
+// below) is preserved unchanged from the original implementation.
 function parsePathSegments(d) {
   if (!d || typeof d !== "string") {
-    return { segments: [], closed: false };
+    return [];
   }
 
   const tokens = d.match(/[MLHVZCSQTAmlhvzcsqta][^MLHVZCSQTAmlhvzcsqta]*/g);
 
   if (!tokens) {
-    return { segments: [], closed: false };
+    return [];
   }
 
   const ARITY = { m: 2, l: 2, h: 1, v: 1, c: 6, s: 4, q: 4, t: 2, a: 7, z: 0 };
 
-  const segments = [];
+  const subpaths = [];
   let current = { x: 0, y: 0 };
   let subpathStart = { x: 0, y: 0 };
-  let closed = false;
-  let firstMove = true;
+  let activeSubpath = null;
+
+  function startNewSubpath(point) {
+    activeSubpath = { segments: [], closed: false };
+    subpaths.push(activeSubpath);
+    current = { ...point };
+    subpathStart = { ...point };
+  }
 
   for (const token of tokens) {
     const command = token[0];
@@ -79,9 +101,11 @@ function parsePathSegments(d) {
     const args = (token.slice(1).match(/-?\d*\.?\d+(?:e[-+]?\d+)?/gi) || []).map(Number);
 
     if (key === "z") {
-      segments.push({ x1: current.x, y1: current.y, x2: subpathStart.x, y2: subpathStart.y });
-      current = { ...subpathStart };
-      closed = true;
+      if (activeSubpath) {
+        activeSubpath.segments.push({ x1: current.x, y1: current.y, x2: subpathStart.x, y2: subpathStart.y });
+        activeSubpath.closed = true;
+        current = { ...subpathStart };
+      }
       continue;
     }
 
@@ -103,23 +127,23 @@ function parsePathSegments(d) {
         next = { x: isRelative ? current.x + dx : dx, y: isRelative ? current.y + dy : dy };
       }
 
-      if (key === "m" && i === 0 && firstMove) {
-        current = next;
-        subpathStart = { ...next };
-        firstMove = false;
+      if (key === "m" && i === 0) {
+        startNewSubpath(next);
         continue;
       }
 
-      segments.push({ x1: current.x, y1: current.y, x2: next.x, y2: next.y });
-      current = next;
-
-      if (key === "m" && i === 0) {
-        subpathStart = { ...next };
+      if (!activeSubpath) {
+        // Malformed path: a drawing command before any moveto. Start an
+        // implicit subpath at the origin rather than discarding data.
+        startNewSubpath(current);
       }
+
+      activeSubpath.segments.push({ x1: current.x, y1: current.y, x2: next.x, y2: next.y });
+      current = next;
     }
   }
 
-  return { segments, closed };
+  return subpaths.filter((subpath) => subpath.segments.length > 0);
 }
 
 function segmentsFromPoints(points, close) {
@@ -248,17 +272,22 @@ function primitiveToGeometry(primitive) {
     }
 
     case "path": {
-      const { segments, closed } = parsePathSegments(attrs.d);
+      // BXP-12 — a single <path> element may decompose into multiple
+      // independent subpaths (see parsePathSegments above); each becomes
+      // its own primitive-geometry entry here. The common case (one
+      // subpath) still returns a one-element array so the caller
+      // (geometry-cleaner.js) has a single, uniform shape to iterate.
+      const subpaths = parsePathSegments(attrs.d);
 
-      if (segments.length === 0) {
+      if (subpaths.length === 0) {
         return null;
       }
 
-      return {
-        geometry: { segmentCount: segments.length },
-        segments: roundSegments(segments),
-        closed,
-      };
+      return subpaths.map((subpath) => ({
+        geometry: { segmentCount: subpath.segments.length },
+        segments: roundSegments(subpath.segments),
+        closed: subpath.closed,
+      }));
     }
 
     case "text": {
@@ -294,6 +323,17 @@ function isZeroLength(type, geometry, segments) {
   return segments.every((s) => s.x1 === s.x2 && s.y1 === s.y2);
 }
 
+// BXP-12A — reverted the BXP-12 geometryKey tightening (fingerprinting
+// paths on actual segment coordinates instead of segmentCount). Validation
+// showed it uncovers a massive pre-existing volume of near-identical real
+// CAD paths that the rest of the pipeline cannot handle at scale (Phoenix's
+// real file: cleanedGeometry 416 -> 63,112 primitives, hanging extraction
+// past 5 minutes) and silently changes a floor previously used as a
+// calibration baseline (BuildingSVG: 54 -> 891 accepted rooms). That
+// problem is real but is its own, separate, not-yet-scoped milestone — see
+// BXP-13. This function is intentionally back to its pre-BXP-12 behavior;
+// only the subpath-splitting fix in parsePathSegments/primitiveToGeometry
+// above is being kept and shipped in this milestone.
 function geometryKey(type, layer, geometry) {
   return `${type}:${layer || ""}:${JSON.stringify(geometry)}`;
 }
