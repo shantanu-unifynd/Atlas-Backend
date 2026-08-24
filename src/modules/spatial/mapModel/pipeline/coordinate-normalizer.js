@@ -22,6 +22,17 @@ function applyMatrix(m, x, y) {
   };
 }
 
+// BXP-14 hotfix — a <path> element with multiple subpaths (BXP-12A) is
+// split into several cleanedGeometry primitives with derived ids
+// (`${elementId}-sub${n}`), none of which match the original ACSM
+// element's id directly. Falling back to the base element id recovers the
+// correct transform for these; every other id (the vast majority, and all
+// non-path types) matches directly on the first attempt as before.
+function baseElementId(primitiveId) {
+  const match = /^(.*)-sub\d+$/.exec(primitiveId);
+  return match ? match[1] : primitiveId;
+}
+
 // geometryModel: the stored GeometryModel record (has cleanedGeometry).
 // normalizedBlueprint: the stored NormalizedBlueprint record (ACSM: elements
 // with attributes.transform, bounds, coordinateSystem).
@@ -37,8 +48,9 @@ function normalizeGeometry(geometryModel, normalizedBlueprint) {
   const primitives = [];
 
   for (const primitive of cleaned) {
-    const hasTransform = transformById.has(primitive.id);
-    const matrix = hasTransform ? transformById.get(primitive.id) : null;
+    const lookupId = transformById.has(primitive.id) ? primitive.id : baseElementId(primitive.id);
+    const hasTransform = transformById.has(lookupId);
+    const matrix = hasTransform ? transformById.get(lookupId) : null;
     if (hasTransform) matchedTransforms += 1;
 
     const segments = Array.isArray(primitive.segments) ? primitive.segments : [];
