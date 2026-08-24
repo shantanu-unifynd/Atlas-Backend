@@ -18,6 +18,16 @@ const EPS = 0.05;
 // Do not raise/lower without new calibration evidence, same as MIN_AREA.
 const ENVELOPE_POLY_AREA_PERCENT = 50;
 
+// BXP-11B — extreme aspect-ratio rejection. Threshold calibrated in BXP-11A
+// against 77 real accepted rooms across BuildingSVG, Unifynd tech, and the
+// BXP-08 shared-wall fixture: known-good aspect ratio (max(w,h)/min(w,h))
+// topped out at 24.41; the only Phoenix outlier measured was a 149.67
+// near-zero-height sliver. 30 sits in that measured gap with zero known-
+// good false positives (BXP-11A). Detection only — never reshapes a
+// polygon, only excludes it from accepted output, same as every other gate
+// in this file.
+const ASPECT_RATIO_THRESHOLD = 30;
+
 // Bounding box of every primitive's segments in the floor — the same
 // "overall floor geometry bbox" measure BXP-04/05 used, computed once per
 // assembleRooms() call rather than per-candidate.
@@ -212,6 +222,91 @@ function ringFromBoundary(boundary, primitivesById) {
   return ring;
 }
 
+// BXP-11B — bbox width/height of a ring, for the aspect-ratio gate only.
+function bboxDimensions(pts) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const p of pts) {
+    minX = Math.min(minX, p.x);
+    maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y);
+    maxY = Math.max(maxY, p.y);
+  }
+
+  return { width: maxX - minX, height: maxY - minY };
+}
+
+// BXP-11B — a degenerate (zero-width or zero-height) ring is rejected
+// safely rather than dividing by zero; a genuine sliver this thin is never
+// a real room regardless of its aspect ratio value.
+function isExtremeAspectRatio(ring) {
+  const { width, height } = bboxDimensions(ring);
+  if (width <= 0 || height <= 0) return true;
+  const aspect = Math.max(width, height) / Math.min(width, height);
+  return aspect > ASPECT_RATIO_THRESHOLD;
+}
+
+// BXP-11B — exact-duplicate detection only, never used for the room's own
+// stored polygon. Independently re-normalizes winding (its own signed-area
+// check/reverse) rather than assuming regularizeRing's winding convention,
+// then rotates to start at the lexicographically-smallest point to remove
+// starting-vertex ambiguity. Two rings compare equal only on exact
+// coordinate equality post-canonicalization — no distance tolerance, no
+// area/bbox similarity.
+function signedRingArea(pts) {
+  let sum = 0;
+  for (let i = 0; i < pts.length; i += 1) {
+    const p = pts[i];
+    const q = pts[(i + 1) % pts.length];
+    sum += p.x * q.y - q.x * p.y;
+  }
+  return sum / 2;
+}
+
+function canonicalizeForDuplicateCheck(ring) {
+  const oriented = signedRingArea(ring) < 0 ? [...ring].reverse() : ring;
+  let minIndex = 0;
+  for (let i = 1; i < oriented.length; i += 1) {
+    const candidate = oriented[i];
+    const current = oriented[minIndex];
+    if (candidate.x < current.x || (candidate.x === current.x && candidate.y < current.y)) {
+      minIndex = i;
+    }
+  }
+  return [...oriented.slice(minIndex), ...oriented.slice(0, minIndex)];
+}
+
+function ringsExactlyEqual(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i].x !== b[i].x || a[i].y !== b[i].y) return false;
+  }
+  return true;
+}
+
+// BXP-11B — collapses exact-duplicate accepted polygons to a single
+// representative: the first one accepted, in the existing stable boundary-
+// processing order (the order `polygonRooms` is already in). Never merges
+// geometry and never alters the surviving polygon's own points — only
+// removes the redundant copies.
+function collapseExactDuplicates(polygonRooms) {
+  const seenCanonicalRings = [];
+  const kept = [];
+
+  for (const room of polygonRooms) {
+    const canonical = canonicalizeForDuplicateCheck(room.polygon);
+    const isDuplicate = seenCanonicalRings.some((seen) => ringsExactlyEqual(seen, canonical));
+    if (isDuplicate) continue;
+    seenCanonicalRings.push(canonical);
+    kept.push(room);
+  }
+
+  return kept;
+}
+
 function assembleRooms({ primitives, boundaries, nodes, usoByCandidateId, semanticByUsoId }) {
   const primitivesById = new Map(primitives.map((p) => [p.id, p]));
   const labeledNodes = nodes.filter((n) => n && n.label);
@@ -245,6 +340,8 @@ function assembleRooms({ primitives, boundaries, nodes, usoByCandidateId, semant
       const polyAreaPercent = (area / floorBboxArea) * 100;
       if (polyAreaPercent > ENVELOPE_POLY_AREA_PERCENT) continue;
     }
+    // BXP-11B — extreme aspect-ratio rejection, after every existing gate.
+    if (isExtremeAspectRatio(ring)) continue;
     polygonCount += 1;
 
     const uso = usoByCandidateId.get(boundary.id) || null;
@@ -270,6 +367,15 @@ function assembleRooms({ primitives, boundaries, nodes, usoByCandidateId, semant
       source: "SEMANTIC",
     });
   }
+
+  // BXP-11B — exact-duplicate collapse, applied once over the full accepted
+  // SEMANTIC/polygon set (duplicates can only be detected by comparing
+  // across boundaries, not within the single forward loop above). Point-
+  // fallback rooms below are untouched — they are never polygons.
+  const dedupedPolygonRooms = collapseExactDuplicates(rooms);
+  polygonCount = dedupedPolygonRooms.length;
+  rooms.length = 0;
+  rooms.push(...dedupedPolygonRooms);
 
   // Graceful fallback: every labeled node not inside a polygon becomes a point room.
   for (const n of labeledNodes) {
