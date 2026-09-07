@@ -6,6 +6,8 @@ const floorRepository = require("../../../../repositories/floor/floor.repository
 const storage = require("../../processing/storage/storage");
 const { validateSvgContent } = require("../validators/svg.validator");
 const { parseSvg } = require("../parsers/svg.parser");
+const { validateDxfContent } = require("../validators/dxf.validator");
+const { parseDxf } = require("../parsers/dxf.parser");
 const { normalizeToAcsm } = require("../normalizers/acsm.normalizer");
 const NormalizedBlueprint = require("../models/normalizedBlueprint.model");
 
@@ -19,6 +21,11 @@ const PARSERS_BY_MIME_TYPE = {
     validate: validateSvgContent,
     parse: parseSvg,
   },
+  // P1 — DXF (CAD). parseDxf emits the same { root, layers, elements }
+  // intermediate as SVG, so normalizeToAcsm and downstream run unchanged.
+  "image/vnd.dxf": { sourceFormat: "dxf", validate: validateDxfContent, parse: parseDxf },
+  "application/dxf": { sourceFormat: "dxf", validate: validateDxfContent, parse: parseDxf },
+  "image/x-dxf": { sourceFormat: "dxf", validate: validateDxfContent, parse: parseDxf },
 };
 
 function toNormalizedBlueprint(record, blueprintImport) {

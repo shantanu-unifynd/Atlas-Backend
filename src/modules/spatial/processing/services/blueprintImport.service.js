@@ -9,7 +9,7 @@ const storage = require("../storage/storage");
 // Story 01 only ever produces UPLOADED rows. VALIDATING/FAILED are defined so
 // the schema is ready for Story 02 (actual SVG validation) to transition into
 // them; this story has no logic that reaches those states itself.
-const SUPPORTED_MIME_TYPES = ["image/svg+xml"];
+const SUPPORTED_MIME_TYPES = ["image/svg+xml", "image/vnd.dxf", "application/dxf", "image/x-dxf"];
 
 function toBlueprintImport(record) {
   return new BlueprintImport({
