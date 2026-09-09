@@ -11,6 +11,7 @@ const DxfParserModule = require("dxf-parser");
 // DXF has no viewBox, so we synthesize root.viewBox from the entity extents.
 
 const DxfParser = DxfParserModule.default || DxfParserModule;
+const { ROLE, classifyLayer } = require("./dxf.layers");
 
 function round(n) {
   return Math.round(n * 100) / 100;
@@ -43,6 +44,9 @@ function parseDxf(rawText) {
   for (const e of entities) {
     const type = String(e.type || "").toUpperCase();
     const layer = e.layer || null;
+    // P2 — classify the layer; drop dimensions/structural/roof/furniture noise.
+    const role = classifyLayer(layer);
+    if (role === ROLE.IGNORE) continue;
     const id = `dxf-${i}`;
     i += 1;
 
@@ -51,12 +55,11 @@ function parseDxf(rawText) {
       if (verts.length < 2) continue;
       verts.forEach((v) => track(v.x, v.y));
       const closed = e.shape === true || e.closed === true;
-      elements.push({
-        id,
-        tag: closed && verts.length >= 3 ? "polygon" : "polyline",
-        layer,
-        attributes: { points: pointsString(verts) },
-      });
+      // Walls/doors are never rooms; only room/unknown closed polylines -> room polygons.
+      const tag = role === ROLE.WALL || role === ROLE.DOOR
+        ? "polyline"
+        : closed && verts.length >= 3 ? "polygon" : "polyline";
+      elements.push({ id, tag, layer, attributes: { points: pointsString(verts) } });
     } else if (type === "LINE") {
       const s = e.vertices ? e.vertices[0] : e.start;
       const en = e.vertices ? e.vertices[1] : e.end;
