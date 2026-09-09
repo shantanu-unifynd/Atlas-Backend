@@ -18,6 +18,24 @@ const { buildGeometryModel } = require("../pipeline/geometry-model-builder");
 // from Phase A/B.
 const PIPELINE_VERSION = "1.1.0";
 
+// SVG blueprints are authored in exact pixel coordinates, so their topology is
+// built with exact node matching (snap = 0). CAD formats (DXF) carry real-world
+// coordinates where a tool commonly leaves adjacent wall corners a fraction of
+// a unit apart; without snapping, those near-miss endpoints become separate
+// nodes and the wall graph fragments, so no room face can close. We snap CAD
+// coordinates onto a grid sized as a small fraction of the drawing's diagonal
+// (measured safe zone on real floorplans: well under the ~0.5-unit wall-
+// thickness spacing, so genuine parallel walls are never merged).
+const CAD_SNAP_FACTOR = 0.00025;
+
+function snapToleranceFor(acsm) {
+  if (!acsm || acsm.sourceFormat === "svg") return 0;
+  const b = acsm.bounds;
+  if (!b || ![b.minX, b.minY, b.maxX, b.maxY].every(Number.isFinite)) return 0;
+  const diagonal = Math.hypot(b.maxX - b.minX, b.maxY - b.minY);
+  return diagonal * CAD_SNAP_FACTOR;
+}
+
 function toGeometryModel(record, metadata) {
   return new GeometryModel({
     id: record.id,
@@ -64,7 +82,7 @@ async function extractGeometry(buildingId, floorId, importId) {
 
   const { primitives, statistics: primitiveStatistics } = collectPrimitives(acsm);
   const { cleaned: cleanedGeometry, removed } = cleanGeometry(primitives);
-  const topology = buildTopology(cleanedGeometry);
+  const topology = buildTopology(cleanedGeometry, snapToleranceFor(acsm));
   const candidateObjects = emptyCandidateSkeleton();
   const relationships = [];
 
@@ -213,7 +231,7 @@ async function regenerateCandidates(buildingId, floorId, importId) {
     throw error;
   }
 
-  const topology = buildTopology(record.cleanedGeometry);
+  const topology = buildTopology(record.cleanedGeometry, snapToleranceFor(acsm));
   const { candidateObjects, warnings } = classifyGeometry(record.cleanedGeometry, topology);
   const relationships = buildRelationships(candidateObjects, record.cleanedGeometry, topology);
 

@@ -7,16 +7,27 @@
 
 const TOUCH_EPSILON = 0.5; // SVG user units
 
-function pointKey(x, y) {
+// snapTolerance = 0 means exact-coordinate matching (the original behaviour,
+// which the SVG path relies on). A positive tolerance quantizes each endpoint
+// onto a grid of that cell size before keying, so near-miss corners that a CAD
+// tool left a fraction of a unit apart collapse onto one shared node instead of
+// fragmenting the wall graph. The stored node keeps its first-seen real
+// coordinate; only the bucket used for matching is snapped.
+function pointKey(x, y, snapTolerance = 0) {
+  if (snapTolerance > 0) {
+    const qx = Math.round(x / snapTolerance) * snapTolerance;
+    const qy = Math.round(y / snapTolerance) * snapTolerance;
+    return `${qx},${qy}`;
+  }
   return `${x},${y}`;
 }
 
-function buildNodesAndEdges(cleanedGeometry) {
+function buildNodesAndEdges(cleanedGeometry, snapTolerance = 0) {
   const nodeMap = new Map();
   const edges = [];
 
   function getOrCreateNode(x, y) {
-    const key = pointKey(x, y);
+    const key = pointKey(x, y, snapTolerance);
 
     if (!nodeMap.has(key)) {
       nodeMap.set(key, { id: `node-${nodeMap.size}`, x, y, sharedBy: [] });
@@ -349,8 +360,8 @@ function computeClosedBoundaries(cleanedGeometry, nodes, edges) {
   return closedBoundaries;
 }
 
-function buildTopology(cleanedGeometry) {
-  const { nodes, edges } = buildNodesAndEdges(cleanedGeometry);
+function buildTopology(cleanedGeometry, snapTolerance = 0) {
+  const { nodes, edges } = buildNodesAndEdges(cleanedGeometry, snapTolerance);
   const touchingPairs = computeTouchingPairs(cleanedGeometry);
   const connectedComponents = computeConnectedComponents(cleanedGeometry, nodes, touchingPairs);
   const closedBoundaries = computeClosedBoundaries(cleanedGeometry, nodes, edges);
