@@ -8,6 +8,8 @@ const { validateSvgContent } = require("../validators/svg.validator");
 const { parseSvg } = require("../parsers/svg.parser");
 const { validateDxfContent } = require("../validators/dxf.validator");
 const { parseDxf } = require("../parsers/dxf.parser");
+const { validateIfcContent } = require("../validators/ifc.validator");
+const { parseIfc } = require("../parsers/ifc.parser");
 const { normalizeToAcsm } = require("../normalizers/acsm.normalizer");
 const NormalizedBlueprint = require("../models/normalizedBlueprint.model");
 
@@ -26,6 +28,14 @@ const PARSERS_BY_MIME_TYPE = {
   "image/vnd.dxf": { sourceFormat: "dxf", validate: validateDxfContent, parse: parseDxf },
   "application/dxf": { sourceFormat: "dxf", validate: validateDxfContent, parse: parseDxf },
   "image/x-dxf": { sourceFormat: "dxf", validate: validateDxfContent, parse: parseDxf },
+  // P3 — IFC (BIM). validate returns the buffer (web-ifc needs bytes) and
+  // parseIfc is async; the normalize flow awaits parse for all formats. .ifc
+  // has no single registered mime type, so accept the common ones clients send.
+  "application/x-ifc": { sourceFormat: "ifc", validate: validateIfcContent, parse: parseIfc },
+  "application/ifc": { sourceFormat: "ifc", validate: validateIfcContent, parse: parseIfc },
+  "model/ifc": { sourceFormat: "ifc", validate: validateIfcContent, parse: parseIfc },
+  "application/step": { sourceFormat: "ifc", validate: validateIfcContent, parse: parseIfc },
+  "application/p21": { sourceFormat: "ifc", validate: validateIfcContent, parse: parseIfc },
 };
 
 function toNormalizedBlueprint(record, blueprintImport) {
@@ -136,8 +146,11 @@ async function normalizeBlueprintImport(buildingId, floorId, importId) {
 
   try {
     const buffer = await readStoredFile(blueprintImport);
-    const rawText = parserEntry.validate(buffer);
-    const parsed = parserEntry.parse(rawText);
+    // validate returns whatever parse consumes (raw text for SVG/DXF, the byte
+    // buffer for IFC). parse may be async (IFC/web-ifc); awaiting a synchronous
+    // return (SVG/DXF) resolves immediately, so this is safe for every format.
+    const validated = parserEntry.validate(buffer);
+    const parsed = await parserEntry.parse(validated);
     const acsm = normalizeToAcsm(parsed);
 
     let record;

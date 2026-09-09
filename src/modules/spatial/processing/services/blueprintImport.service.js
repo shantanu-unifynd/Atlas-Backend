@@ -9,7 +9,19 @@ const storage = require("../storage/storage");
 // Story 01 only ever produces UPLOADED rows. VALIDATING/FAILED are defined so
 // the schema is ready for Story 02 (actual SVG validation) to transition into
 // them; this story has no logic that reaches those states itself.
-const SUPPORTED_MIME_TYPES = ["image/svg+xml", "image/vnd.dxf", "application/dxf", "image/x-dxf"];
+const SUPPORTED_MIME_TYPES = [
+  "image/svg+xml",
+  "image/vnd.dxf",
+  "application/dxf",
+  "image/x-dxf",
+  // P3 — IFC (BIM). .ifc has no single registered mime type; accept the
+  // common ones clients send. Kept in sync with normalization's registry.
+  "application/x-ifc",
+  "application/ifc",
+  "model/ifc",
+  "application/step",
+  "application/p21",
+];
 
 function toBlueprintImport(record) {
   return new BlueprintImport({
