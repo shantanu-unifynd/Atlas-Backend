@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const path = require("path");
 const { Prisma } = require("@prisma/client");
 const BlueprintImport = require("../models/blueprintImport.model");
 const blueprintImportRepository = require("../../../../repositories/blueprintImport/blueprintImport.repository");
@@ -22,6 +23,24 @@ const SUPPORTED_MIME_TYPES = [
   "application/step",
   "application/p21",
 ];
+
+// Browsers commonly send .dxf/.ifc uploads as application/octet-stream (neither
+// has a reliable registered MIME type), which would fail the allowlist. When the
+// browser-provided type isn't recognized, fall back to the file extension so a
+// correctly-named file is still accepted and routed to the right parser.
+const EXTENSION_MIME_TYPES = {
+  ".svg": "image/svg+xml",
+  ".dxf": "image/vnd.dxf",
+  ".ifc": "application/x-ifc",
+};
+
+function resolveMimeType(file) {
+  if (SUPPORTED_MIME_TYPES.includes(file.mimetype)) {
+    return file.mimetype;
+  }
+  const ext = path.extname(file.originalname || "").toLowerCase();
+  return EXTENSION_MIME_TYPES[ext] || file.mimetype;
+}
 
 function toBlueprintImport(record) {
   return new BlueprintImport({
@@ -86,6 +105,9 @@ function ensureFileSupported(file) {
 async function importBlueprint(buildingId, floorId, file) {
   await ensureBuildingExists(buildingId);
   await ensureFloorExists(buildingId, floorId);
+  if (file) {
+    file.mimetype = resolveMimeType(file);
+  }
   ensureFileSupported(file);
 
   const checksum = crypto.createHash("sha256").update(file.buffer).digest("hex");
