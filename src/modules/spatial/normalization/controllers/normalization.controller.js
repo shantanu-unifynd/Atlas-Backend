@@ -3,15 +3,35 @@ const { successResponse } = require("../../../../common/utils/apiResponse");
 
 async function normalize(req, res, next) {
   try {
+    // Optional IFC storey selector; ignored for SVG/DXF.
+    const { storeyName, storeyIndex } = req.body || {};
     const acsm = await normalizationService.normalizeBlueprintImport(
       req.params.buildingId,
       req.params.floorId,
-      req.params.importId
+      req.params.importId,
+      { storeyName, storeyIndex }
     );
     return successResponse(res, {
       statusCode: 201,
       message: "Blueprint normalized successfully",
       data: acsm,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function getStoreys(req, res, next) {
+  try {
+    const storeys = await normalizationService.getStoreys(
+      req.params.buildingId,
+      req.params.floorId,
+      req.params.importId
+    );
+    return successResponse(res, {
+      statusCode: 200,
+      message: "Storeys fetched successfully",
+      data: storeys,
     });
   } catch (error) {
     next(error);
@@ -38,4 +58,5 @@ async function getAcsm(req, res, next) {
 module.exports = {
   normalize,
   getAcsm,
+  getStoreys,
 };

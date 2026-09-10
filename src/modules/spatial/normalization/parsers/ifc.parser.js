@@ -274,4 +274,39 @@ async function parseIfc(buffer, options = {}) {
   }
 }
 
-module.exports = { parseIfc };
+// Enumerate the model's storeys with a space count each, so the UI can offer a
+// "which storey is this floor?" picker before normalizing. Cheap: no geometry.
+async function listStoreys(buffer) {
+  const api = new WebIFC.IfcAPI();
+  await api.Init();
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  const model = api.OpenModel(bytes);
+
+  try {
+    const childToStorey = buildStoreyIndex(api, model);
+    const spaceIds = api.GetLineIDsWithType(model, WebIFC.IFCSPACE);
+    const countByStorey = new Map();
+    for (let i = 0; i < spaceIds.size(); i++) {
+      const st = childToStorey.get(spaceIds.get(i));
+      countByStorey.set(st, (countByStorey.get(st) || 0) + 1);
+    }
+
+    const storeyIds = api.GetLineIDsWithType(model, WebIFC.IFCBUILDINGSTOREY);
+    const storeys = [];
+    for (let i = 0; i < storeyIds.size(); i++) {
+      const id = storeyIds.get(i);
+      const s = api.GetLine(model, id);
+      storeys.push({
+        index: i,
+        name: (s.Name && s.Name.value) || (s.LongName && s.LongName.value) || `Storey ${i + 1}`,
+        elevation: s.Elevation && s.Elevation.value != null ? s.Elevation.value : null,
+        spaceCount: countByStorey.get(id) || 0,
+      });
+    }
+    return storeys;
+  } finally {
+    api.CloseModel(model);
+  }
+}
+
+module.exports = { parseIfc, listStoreys };

@@ -5,5 +5,6 @@ const router = express.Router({ mergeParams: true });
 
 router.post("/normalize", normalizationController.normalize);
 router.get("/acsm", normalizationController.getAcsm);
+router.get("/storeys", normalizationController.getStoreys);
 
 module.exports = router;

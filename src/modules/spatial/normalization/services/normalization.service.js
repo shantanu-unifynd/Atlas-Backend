@@ -9,7 +9,7 @@ const { parseSvg } = require("../parsers/svg.parser");
 const { validateDxfContent } = require("../validators/dxf.validator");
 const { parseDxf } = require("../parsers/dxf.parser");
 const { validateIfcContent } = require("../validators/ifc.validator");
-const { parseIfc } = require("../parsers/ifc.parser");
+const { parseIfc, listStoreys } = require("../parsers/ifc.parser");
 const { normalizeToAcsm } = require("../normalizers/acsm.normalizer");
 const NormalizedBlueprint = require("../models/normalizedBlueprint.model");
 
@@ -117,7 +117,7 @@ function conflictError() {
   return error;
 }
 
-async function normalizeBlueprintImport(buildingId, floorId, importId) {
+async function normalizeBlueprintImport(buildingId, floorId, importId, options = {}) {
   await ensureBuildingExists(buildingId);
   await ensureFloorExists(buildingId, floorId);
 
@@ -150,7 +150,9 @@ async function normalizeBlueprintImport(buildingId, floorId, importId) {
     // buffer for IFC). parse may be async (IFC/web-ifc); awaiting a synchronous
     // return (SVG/DXF) resolves immediately, so this is safe for every format.
     const validated = parserEntry.validate(buffer);
-    const parsed = await parserEntry.parse(validated);
+    // options carries the IFC storey selector ({ storeyName } / { storeyIndex });
+    // SVG/DXF parsers ignore the second argument.
+    const parsed = await parserEntry.parse(validated, options);
     const acsm = normalizeToAcsm(parsed);
 
     let record;
@@ -214,7 +216,27 @@ async function getAcsm(buildingId, floorId, importId) {
   return toNormalizedBlueprint(record, blueprintImport);
 }
 
+// Lists the storeys inside an uploaded IFC so the UI can ask which one this
+// floor should be. Only meaningful for IFC (SVG/DXF are single-floor).
+async function getStoreys(buildingId, floorId, importId) {
+  await ensureBuildingExists(buildingId);
+  await ensureFloorExists(buildingId, floorId);
+
+  const blueprintImport = await getBlueprintImportOrThrow(buildingId, floorId, importId);
+  const parserEntry = PARSERS_BY_MIME_TYPE[blueprintImport.mimeType];
+
+  if (!parserEntry || parserEntry.sourceFormat !== "ifc") {
+    const error = new Error("Storeys are only available for IFC blueprints");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const buffer = await readStoredFile(blueprintImport);
+  return listStoreys(buffer);
+}
+
 module.exports = {
   normalizeBlueprintImport,
+  getStoreys,
   getAcsm,
 };
