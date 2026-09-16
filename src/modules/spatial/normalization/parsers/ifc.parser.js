@@ -23,6 +23,16 @@ const WebIFC = require("web-ifc");
 
 const round = (n) => Math.round(n * 100) / 100;
 
+// IFC coordinates are in real-world metres. Downstream gates that assume the SVG
+// pixel scale — chiefly the map-builder's absolute MIN_AREA (25 units^2) —
+// silently drop real rooms, since a 3-15 m^2 bathroom/bedroom has area < 25 in
+// metres. Scaling metres -> centimetres at emission lands room areas in the
+// magnitude the pixel-calibrated gates expect; the scale-invariant gates
+// (envelope %, aspect ratio) are unaffected. Rooms, walls, labels and the
+// viewBox all derive from these scaled points, so it is purely a unit choice.
+const WORLD_SCALE = 100;
+const scaleXY = (p) => ({ x: p.x * WORLD_SCALE, y: p.y * WORLD_SCALE });
+
 // --- 4x4 matrix helpers (column-major, [c0r0,c0r1,c0r2,c0r3, c1r0, ...]) ---
 const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
@@ -135,7 +145,7 @@ function spaceFootprint(space) {
   const world = matMul(localPlacementMatrix(space.ObjectPlacement), axis2placementMatrix(solid.Position));
   return local.map((p) => {
     const w = apply(world, p.x, p.y, 0);
-    return { x: w.x, y: w.y };
+    return scaleXY({ x: w.x, y: w.y });
   });
 }
 
@@ -151,7 +161,7 @@ function wallAxis(wall) {
     .filter((c) => c.length >= 2)
     .map(([px, py]) => {
       const w = apply(world, px, py, 0);
-      return { x: w.x, y: w.y };
+      return scaleXY({ x: w.x, y: w.y });
     });
 }
 
