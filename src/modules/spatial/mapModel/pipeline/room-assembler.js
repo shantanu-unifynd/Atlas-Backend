@@ -348,12 +348,16 @@ function assembleRooms({ primitives, boundaries, nodes, usoByCandidateId, semant
     const semantic = uso ? semanticByUsoId.get(uso.id) : null;
     const category = (semantic && semantic.semanticCategory) || (uso && uso.spatialCategory) || null;
 
-    let name = null;
-    for (const n of labeledNodes) {
-      if (!usedNodeIds.has(n.id) && pointInPolygon(n.position, ring)) {
-        name = n.label;
-        usedNodeIds.add(n.id);
-        break;
+    // Prefer an authored room name preserved on the USO (e.g. an IFC IfcSpace
+    // LongName); fall back to a labeled navigation node inside the polygon.
+    let name = (uso && uso.metadata && uso.metadata.name) || null;
+    if (!name) {
+      for (const n of labeledNodes) {
+        if (!usedNodeIds.has(n.id) && pointInPolygon(n.position, ring)) {
+          name = n.label;
+          usedNodeIds.add(n.id);
+          break;
+        }
       }
     }
 

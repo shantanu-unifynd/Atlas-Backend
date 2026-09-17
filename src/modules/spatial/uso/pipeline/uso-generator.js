@@ -31,15 +31,23 @@ function generateUsos(geometryModelId, validatedCandidates, pipelineVersion) {
 
   for (const [collectionKey, spatialCategory] of Object.entries(CANDIDATE_TYPE_TO_SPATIAL_CATEGORY)) {
     for (const candidate of validatedCandidates.candidateObjects[collectionKey] || []) {
+      // A boundary carrying roomHint is an authored room (e.g. an IFC IfcSpace
+      // footprint) — categorize it as ENCLOSURE so the existing ENCLOSURE->ROOM
+      // semantic rule fires, instead of BOUNDARY which no rule classifies.
+      const effectiveCategory = candidate.roomHint ? "ENCLOSURE" : spatialCategory;
+
       usos.push({
         geometryModelId,
         candidateId: candidate.id,
         candidateType: collectionKey,
-        spatialCategory,
+        spatialCategory: effectiveCategory,
         version: 1,
         status: "GENERATED",
         generatedAt,
         generatedFrom: pipelineVersion,
+        // Preserve an authored room name (IfcSpace LongName) recovered by the
+        // classifier, so the map-builder can label the room.
+        ...(candidate.name ? { metadata: { name: candidate.name } } : {}),
         geometryReference: {
           geometryModelId,
           candidateId: candidate.id,

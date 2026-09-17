@@ -16,7 +16,9 @@ function buildUsoModels(usos) {
     geometryReference: uso.geometryReference,
     accessibility: uso.accessibility,
     relationships: uso.relationships,
-    metadata: {},
+    // Preserve upstream metadata (e.g. an authored room name from the
+    // generator) instead of discarding it; default to {} when absent.
+    metadata: uso.metadata || {},
   }));
 }
 

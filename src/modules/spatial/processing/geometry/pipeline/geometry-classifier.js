@@ -36,9 +36,40 @@ function primitiveArea(primitive) {
   return null;
 }
 
+// Ray-cast point-in-polygon; ring is an ordered array of {x,y}.
+function pointInRing(pt, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+    const a = ring[i];
+    const b = ring[j];
+    const hit =
+      a.y > pt.y !== b.y > pt.y &&
+      pt.x < ((b.x - a.x) * (pt.y - a.y)) / ((b.y - a.y) || 1e-9) + a.x;
+    if (hit) inside = !inside;
+  }
+  return inside;
+}
+
+// First text label whose point falls inside the boundary ring — used to
+// recover an authored room name (e.g. an IFC IfcSpace LongName the IFC parser
+// emitted as a text element at the room centroid) that the geometry-only
+// classification would otherwise discard.
+function labelInsideRing(labels, ring) {
+  if (!Array.isArray(ring) || ring.length < 3) return null;
+  for (const label of labels) {
+    if (pointInRing({ x: label.x, y: label.y }, ring)) return label.text;
+  }
+  return null;
+}
+
 function classifyBoundariesAndEnclosures(cleanedGeometry, topology, warnings) {
   const byId = new Map(cleanedGeometry.map((p) => [p.id, p]));
   const nodesById = new Map(topology.nodes.map((n) => [n.id, n]));
+
+  // Loose text primitives that can name a room they sit inside.
+  const labels = cleanedGeometry
+    .filter((p) => p.type === "text" && p.text && p.geometry && Number.isFinite(p.geometry.x))
+    .map((p) => ({ text: p.text, x: p.geometry.x, y: p.geometry.y }));
 
   const candidateBoundaries = [];
   const candidateEnclosures = [];
@@ -46,11 +77,30 @@ function classifyBoundariesAndEnclosures(cleanedGeometry, topology, warnings) {
   topology.closedBoundaries.forEach((boundary, index) => {
     const primitiveIds = boundary.type === "primitive" ? [boundary.primitiveId] : boundary.primitiveIds;
 
+    // Recover the boundary's polygon ring (reused below for enclosure area on
+    // component cycles) and whether it is an authored room. IFC emits IfcSpace
+    // footprints as closed polygons on layer 'IFCSPACE' — an authoritative
+    // "this is a room" signal the generic classifier otherwise throws away.
+    let ring = null;
+    let roomHint = false;
+    if (boundary.type === "primitive") {
+      const prim = byId.get(boundary.primitiveId);
+      if (prim) {
+        roomHint = String(prim.layer || "").toUpperCase() === "IFCSPACE";
+        if (prim.geometry && Array.isArray(prim.geometry.points)) ring = prim.geometry.points;
+      }
+    } else {
+      ring = traceRing(boundary.nodeIds, topology.edges, nodesById);
+    }
+    const name = ring ? labelInsideRing(labels, ring) : null;
+
     candidateBoundaries.push({
       id: `boundary-${index}`,
       source: boundary.type,
       primitiveIds,
       nodeIds: boundary.nodeIds || null,
+      ...(name ? { name } : {}),
+      ...(roomHint ? { roomHint: true } : {}),
     });
 
     if (boundary.type === "primitive") {
@@ -68,8 +118,6 @@ function classifyBoundariesAndEnclosures(cleanedGeometry, topology, warnings) {
 
       return;
     }
-
-    const ring = traceRing(boundary.nodeIds, topology.edges, nodesById);
 
     if (!ring) {
       warnings.push(
