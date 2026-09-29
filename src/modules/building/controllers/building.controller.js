@@ -40,8 +40,36 @@ async function getBuildingById(req, res, next) {
   }
 }
 
+async function updateBuilding(req, res, next) {
+  try {
+    const building = await buildingService.updateBuilding(req.params.id, req.body);
+    return successResponse(res, {
+      statusCode: 200,
+      message: "Building updated successfully",
+      data: building,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function deleteBuilding(req, res, next) {
+  try {
+    await buildingService.deleteBuilding(req.params.id);
+    return successResponse(res, {
+      statusCode: 200,
+      message: "Building deleted successfully",
+      data: null,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   createBuilding,
   getBuildings,
   getBuildingById,
+  updateBuilding,
+  deleteBuilding,
 };

@@ -64,8 +64,58 @@ async function getBuildingById(id) {
   return toBuilding(record);
 }
 
+async function updateBuilding(id, data) {
+  const existing = await buildingRepository.findById(id);
+
+  if (!existing) {
+    const error = new Error("Building not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const merged = {
+    name: data.name !== undefined ? data.name : existing.name,
+    address: data.address !== undefined ? data.address : existing.address,
+    city: data.city !== undefined ? data.city : existing.city,
+    country: data.country !== undefined ? data.country : existing.country,
+    timezone: data.timezone !== undefined ? data.timezone : existing.timezone,
+  };
+
+  const errors = validateBuildingInput(merged);
+
+  if (errors.length > 0) {
+    const error = new Error(errors.join(", "));
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const record = await buildingRepository.update(id, {
+    name: merged.name,
+    address: merged.address || "",
+    city: merged.city,
+    country: merged.country,
+    timezone: merged.timezone,
+  });
+
+  return toBuilding(record);
+}
+
+async function deleteBuilding(id) {
+  const existing = await buildingRepository.findById(id);
+
+  if (!existing) {
+    const error = new Error("Building not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  await buildingRepository.remove(id);
+}
+
 module.exports = {
   createBuilding,
   getAllBuildings,
   getBuildingById,
+  updateBuilding,
+  deleteBuilding,
 };

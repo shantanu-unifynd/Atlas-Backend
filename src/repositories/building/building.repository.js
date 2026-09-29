@@ -18,8 +18,18 @@ function findById(id) {
   return prisma.building.findUnique({ where: { id } });
 }
 
+function update(id, data) {
+  return prisma.building.update({ where: { id }, data });
+}
+
+function remove(id) {
+  return prisma.building.delete({ where: { id } });
+}
+
 module.exports = {
   create,
   findAll,
   findById,
+  update,
+  remove,
 };
