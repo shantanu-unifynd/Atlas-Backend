@@ -150,7 +150,15 @@ async function generate(floorId) {
   // replacesRoomId, that generated room is dropped in favour of the override.
   const overrides = await mapRoomOverrideRepository.findAllByFloorId(floorId);
   const manualRooms = overrides.map(toManualRoom);
+  // Dropped generated rooms = every replacesRoomId plus every id listed in an
+  // override's suppressesRoomIds (MME-06 merge: the merged room replaces one
+  // source room and suppresses the other).
   const replacedRoomIds = new Set(overrides.filter((o) => o.replacesRoomId).map((o) => o.replacesRoomId));
+  for (const o of overrides) {
+    if (Array.isArray(o.suppressesRoomIds)) {
+      for (const id of o.suppressesRoomIds) replacedRoomIds.add(id);
+    }
+  }
   roomResult.rooms = roomResult.rooms.filter((r) => !replacedRoomIds.has(r.id)).concat(manualRooms);
   roomResult.stats.manualRooms = manualRooms.length;
   roomResult.stats.roomCount = roomResult.rooms.length;
@@ -294,9 +302,15 @@ function toManualRoom(o) {
 
 async function createRoomOverride(floorId, body = {}) {
   await ensureFloorExists(floorId);
-  const { name, category, polygon, area, replacesRoomId } = body;
+  const { name, category, polygon, area, replacesRoomId, suppressesRoomIds } = body;
   if (!isValidPolygon(polygon)) {
     throw validationError("polygon must be an array of >= 3 points with numeric x and y");
+  }
+  if (
+    suppressesRoomIds !== undefined &&
+    (!Array.isArray(suppressesRoomIds) || suppressesRoomIds.some((id) => typeof id !== "string"))
+  ) {
+    throw validationError("suppressesRoomIds must be an array of room id strings");
   }
   const override = await mapRoomOverrideRepository.create({
     floorId,
@@ -305,6 +319,7 @@ async function createRoomOverride(floorId, body = {}) {
     polygon,
     area: area != null ? area : polygonArea(polygon),
     replacesRoomId: replacesRoomId || null,
+    suppressesRoomIds: suppressesRoomIds || [],
   });
   const mpm = await generate(floorId); // apply overrides -> new MPM version
   return { override, mpmVersion: mpm.version };

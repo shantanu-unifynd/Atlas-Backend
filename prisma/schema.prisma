@@ -104,6 +104,10 @@ model MapRoomOverride {
   polygon        Json
   area           Float?
   replacesRoomId String? @map("replaces_room_id")
+  // MME-06 merge — generated rooms swallowed by this override IN ADDITION to
+  // replacesRoomId (a merged room replaces one source room and suppresses the
+  // other). JSON array of room ids.
+  suppressesRoomIds Json @default("[]") @map("suppresses_room_ids")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
