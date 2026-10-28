@@ -205,20 +205,17 @@ async function generate(floorId) {
 async function getByFloorId(floorId, { published = false } = {}) {
   await ensureFloorExists(floorId);
 
-  // Default (backward compatible): the latest version, whatever its status.
-  // published=true: the floor's single live (published) version.
+  // Default: the latest version, whatever its status. published=true: the
+  // floor's single live (published) version. "No model yet" is a VALID state
+  // for an existing floor (not a missing resource), so it resolves to null —
+  // the controller returns 200 with data:null and browsers stop logging a
+  // red 404 on every fresh floor (ui-bug-sweep #6). An unknown floor still
+  // 404s via ensureFloorExists above.
   const record = published
     ? await mapPresentationModelRepository.findLatestPublishedByFloorId(floorId)
     : await mapPresentationModelRepository.findLatestByFloorId(floorId);
-  if (!record) {
-    throw notFoundError(
-      published
-        ? "No published map presentation model for this floor"
-        : "Map presentation model has not been generated for this floor"
-    );
-  }
 
-  return toModel(record);
+  return record ? toModel(record) : null;
 }
 
 // --- Sprint 07A: publish workflow ---

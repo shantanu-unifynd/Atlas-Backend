@@ -14,14 +14,20 @@ function validateFloorInput(data) {
   return errors;
 }
 
+// A floor's effective status is DERIVED: "published" as soon as it has a live
+// (PUBLISHED) map presentation model, else the stored status (Figma 2.5 — a
+// floor goes Published when its map is published). Derivation (not a stored
+// flip on publish) also corrects floors whose maps were published before this
+// rule existed, and self-corrects if a published map is ever archived.
 function toFloor(record) {
+  const publishedMaps = record._count ? record._count.mapPresentationModels : 0;
   return new Floor({
     id: record.id,
     buildingId: record.buildingId,
     name: record.name,
     level: record.level,
     blueprint: null,
-    status: record.status,
+    status: publishedMaps > 0 ? "published" : record.status,
     createdAt: record.createdAt,
   });
 }

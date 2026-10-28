@@ -22,10 +22,20 @@ async function computeShortestPath(graphId, originNodeId, destinationNodeId) {
 
   const result = dijkstraEngine.computeShortestPath(adjacency, originNodeId, destinationNodeId);
 
+  // "No route" is a VALID computation result (two disconnected points), not a
+  // missing resource — answer 200 with an empty path instead of a 404 so the
+  // browser stops logging a red error for a handled state (ui-bug-sweep #7).
+  // Invalid graph/node ids still fail earlier in loadGraphForRouting.
   if (!result) {
-    const error = new Error("No route exists between the origin and destination");
-    error.statusCode = 404;
-    throw error;
+    return {
+      graphId,
+      originNodeId,
+      destinationNodeId,
+      path: [],
+      totalCost: null,
+      algorithm: ALGORITHM_NAME,
+      computedAt: new Date().toISOString(),
+    };
   }
 
   const nodeIds = new Set(nodes.map((node) => node.id));

@@ -6,10 +6,18 @@ function create(data) {
   return prisma.floor.create({ data });
 }
 
+// Both reads count the floor's PUBLISHED map presentation models so the
+// service can derive the floor's effective status ("published" once a live
+// map exists — Figma 2.5) without a second query per floor.
+const PUBLISHED_MAP_COUNT = {
+  _count: { select: { mapPresentationModels: { where: { status: "PUBLISHED" } } } },
+};
+
 function findAllByBuildingId(buildingId) {
   return prisma.floor.findMany({
     where: { buildingId },
     orderBy: { level: "asc" },
+    include: PUBLISHED_MAP_COUNT,
   });
 }
 
@@ -18,7 +26,7 @@ function findById(id) {
     return null;
   }
 
-  return prisma.floor.findUnique({ where: { id } });
+  return prisma.floor.findUnique({ where: { id }, include: PUBLISHED_MAP_COUNT });
 }
 
 module.exports = {
