@@ -26,6 +26,12 @@ dist/
 # Temporary
 tmp/
 temp/
+.playwright-mcp/
 
 # Uploaded files (local dev storage only)
 uploads/
+
+# img
+*.png
+*.jpg
+*.jpeg

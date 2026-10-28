@@ -7,7 +7,10 @@ function create(data) {
 }
 
 function findAll() {
-  return prisma.building.findMany({ orderBy: { createdAt: "asc" } });
+  return prisma.building.findMany({
+    orderBy: { createdAt: "asc" },
+    include: { _count: { select: { floors: true } } },
+  });
 }
 
 function findById(id) {

@@ -21,6 +21,8 @@ function toBuilding(record) {
     city: record.city,
     country: record.country,
     timezone: record.timezone,
+    status: record.status,
+    floorCount: record._count ? record._count.floors : undefined,
     createdAt: record.createdAt,
   });
 }
