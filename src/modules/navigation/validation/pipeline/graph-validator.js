@@ -6,13 +6,14 @@ const { buildStatistics } = require("./graph-statistics");
 // UniversalSpatialObject/Geometry.
 //
 // Severity split: structural integrity violations (an edge pointing at a
-// node that isn't in this graph, a self-loop, a duplicate directed edge, or
-// a statistics mismatch) are ERRORS — the graph is corrupt and cannot
-// safely route, so it becomes INVALID. Connectivity-completeness concerns
-// (an isolated node, a graph split across multiple components) are
-// WARNINGS — the graph is still structurally sound and usable for the
-// parts that ARE connected, so it becomes VALID_WITH_WARNINGS rather than
-// INVALID.
+// node that isn't in this graph, a self-loop, a duplicate directed edge, a
+// statistics mismatch, or an ISOLATED node with no connections) are ERRORS
+// — the graph becomes INVALID. Isolated nodes were originally warnings, but
+// the design (Figma 6.7) treats an unreachable point as a defect the
+// operator must fix (connect it or delete it), not a note. A graph split
+// across MULTIPLE COMPONENTS — where every node is connected to something —
+// stays a WARNING: each cluster still routes internally, so it becomes
+// VALID_WITH_WARNINGS rather than INVALID.
 function validateStructure(graphId, graph, nodes, edges) {
   const errors = [];
 
@@ -71,8 +72,10 @@ function validateGraph(graphId, graph, nodes, edges) {
   const statistics = buildStatistics(nodes, edges);
   const warnings = [];
 
+  // Figma 6.7 / M6b — an unreachable point is a defect, not a note: connect
+  // it or delete it before the graph can validate.
   if (statistics.isolatedNodeCount > 0) {
-    warnings.push(
+    errors.push(
       `${statistics.isolatedNodeCount} isolated node(s) detected with no connections`
     );
   }
