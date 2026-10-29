@@ -108,9 +108,26 @@ async function getFloorByIdOnly(floorId) {
   return toFloor(record);
 }
 
+// Figma 2.4 — delete floor. Ownership-checked like getFloorById; the schema's
+// cascades remove the floor's blueprint imports, map models and graphs with it.
+async function deleteFloor(buildingId, floorId) {
+  await ensureBuildingExists(buildingId);
+
+  const record = await floorRepository.findById(floorId);
+
+  if (!record || record.buildingId !== buildingId) {
+    const error = new Error("Floor not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  await floorRepository.remove(floorId);
+}
+
 module.exports = {
   createFloor,
   getFloorsByBuildingId,
   getFloorById,
   getFloorByIdOnly,
+  deleteFloor,
 };

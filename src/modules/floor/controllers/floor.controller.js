@@ -43,8 +43,22 @@ async function getFloorById(req, res, next) {
   }
 }
 
+async function deleteFloor(req, res, next) {
+  try {
+    await floorService.deleteFloor(req.params.buildingId, req.params.floorId);
+    return successResponse(res, {
+      statusCode: 200,
+      message: "Floor deleted successfully",
+      data: null,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   createFloor,
   getFloors,
   getFloorById,
+  deleteFloor,
 };

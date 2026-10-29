@@ -29,8 +29,16 @@ function findById(id) {
   return prisma.floor.findUnique({ where: { id }, include: PUBLISHED_MAP_COUNT });
 }
 
+// Deleting a floor relies on the schema's onDelete: Cascade from every
+// floor-scoped table (blueprint imports, map models, navigation graphs, …),
+// so one delete removes the floor and all its pipeline data.
+function remove(id) {
+  return prisma.floor.delete({ where: { id } });
+}
+
 module.exports = {
   create,
   findAllByBuildingId,
   findById,
+  remove,
 };
