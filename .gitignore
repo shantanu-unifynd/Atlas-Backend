@@ -35,3 +35,10 @@ uploads/
 *.png
 *.jpg
 *.jpeg
+
+# Local-only BXP diagnostic scripts (bxp08–bxp12 remain tracked)
+src/modules/spatial/bxp03-evaluation/bxp13-diagnose-hidden-primitives.js
+src/modules/spatial/bxp03-evaluation/bxp14a-content-filter-calibration.js
+src/modules/spatial/bxp03-evaluation/bxp14a2-combined-signal.js
+src/modules/spatial/bxp03-evaluation/bxp15a-combined-fix-calibration.js
+src/modules/spatial/bxp03-evaluation/bxp16a-topology-profiling.js
