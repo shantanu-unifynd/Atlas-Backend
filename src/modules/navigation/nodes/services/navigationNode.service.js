@@ -25,6 +25,18 @@ function positionFromTransform(transform) {
   return { x: Math.round(n[4]), y: Math.round(n[5]) };
 }
 
+// Many SVGs (the WTC mall plan among them) position text with plain x/y
+// attributes instead of a transform — accept either, or the label import
+// silently drops every match for "no position".
+function positionFromElement(attributes = {}) {
+  const fromTransform = positionFromTransform(attributes.transform);
+  if (fromTransform) return fromTransform;
+  const x = Number(attributes.x);
+  const y = Number(attributes.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x: Math.round(x), y: Math.round(y) };
+}
+
 // Sprint 06 Story 03 — Navigation Node Generation. Orchestration only: every
 // transformation lives in its own pipeline stage module. Transforms
 // previously generated NavigationCandidates into canonical NavigationNodes
@@ -309,7 +321,7 @@ async function importNodesFromLabels(graphId, body = {}) {
     if (element.type !== "text") continue;
     const label = String(element.text || "").trim();
     if (!label || !regex.test(label)) continue;
-    const position = positionFromTransform(element.attributes && element.attributes.transform);
+    const position = positionFromElement(element.attributes || {});
     if (!position) continue;
     rows.push({
       graphId,
