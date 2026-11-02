@@ -8,6 +8,7 @@ const objectRoutes = require("./modules/spatial/object/routes/object.routes");
 const graphRoutes = require("./modules/spatial/graph/routes/graph.routes");
 const blueprintImportRoutes = require("./modules/spatial/processing/routes/blueprintImport.routes");
 const normalizationRoutes = require("./modules/spatial/normalization/routes/normalization.routes");
+const autoExtractRoutes = require("./modules/spatial/autoExtract/routes/autoExtract.routes");
 const geometryRoutes = require("./modules/spatial/processing/geometry/routes/geometry.routes");
 const usoRoutes = require("./modules/spatial/uso/routes/uso.routes");
 const semanticRoutes = require("./modules/spatial/semantic/routes/semantic.routes");
@@ -49,6 +50,7 @@ app.use((req, res, next) => {
 });
 app.use("/api/buildings", buildingRoutes);
 app.use("/api/buildings/:buildingId/floors", floorRoutes);
+app.use("/api/buildings/:buildingId/floors/:floorId/auto-extract", autoExtractRoutes);
 app.use("/api/floors/:floorId/assets", assetRoutes);
 app.use("/api/floors/:floorId/blueprint", blueprintRoutes);
 app.use("/api/blueprints/:blueprintId/objects", objectRoutes.nestedRouter);
