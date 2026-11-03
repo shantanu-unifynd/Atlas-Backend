@@ -22,6 +22,10 @@ const SUPPORTED_MIME_TYPES = [
   "model/ifc",
   "application/step",
   "application/p21",
+  // PDF — directory/vector plans the auto-extract (Python) pipeline reads
+  // natively via PyMuPDF. The legacy Node "Process Blueprint" path does not
+  // parse PDF; use "Extract automatically" for PDFs.
+  "application/pdf",
 ];
 
 // Browsers commonly send .dxf/.ifc uploads as application/octet-stream (neither
@@ -32,6 +36,7 @@ const EXTENSION_MIME_TYPES = {
   ".svg": "image/svg+xml",
   ".dxf": "image/vnd.dxf",
   ".ifc": "application/x-ifc",
+  ".pdf": "application/pdf",
 };
 
 function resolveMimeType(file) {
