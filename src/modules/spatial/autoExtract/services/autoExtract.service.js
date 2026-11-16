@@ -46,26 +46,29 @@ async function persist(buildingId, floorId, atlas) {
     ((await mpmRepo.findMaxVersion(floorId))?._max?.version ?? 0) + 1;
 
   return prisma.$transaction(async (tx) => {
-    const mpm = await tx.mapPresentationModel.create({
-      data: {
-        floorId,
-        version: nextVersion,
-        status: "GENERATED",
-        data: {
-          coordinateSystem: atlas.coordinateSystem,
-          rooms: atlas.rooms,
-          labels: atlas.labels,
-          source: "auto-extract",
-        },
-      },
-    });
-
+    // Graph first so the map model can link to it — a published MPM without
+    // navigationGraphId makes the client show "Wayfinding isn't available".
     const graph = await tx.navigationGraph.create({
       data: {
         buildingId,
         floorId,
         status: "READY",
         pipelineVersion: PIPELINE_VERSION,
+      },
+    });
+
+    const mpm = await tx.mapPresentationModel.create({
+      data: {
+        floorId,
+        version: nextVersion,
+        status: "GENERATED",
+        navigationGraphId: graph.id,
+        data: {
+          coordinateSystem: atlas.coordinateSystem,
+          rooms: atlas.rooms,
+          labels: atlas.labels,
+          source: "auto-extract",
+        },
       },
     });
 
@@ -76,7 +79,7 @@ async function persist(buildingId, floorId, atlas) {
       const created = await tx.navigationNode.create({
         data: {
           graphId: graph.id,
-          source: "MANUAL",
+          source: "AUTO",
           nodeType: node.nodeType,
           position: node.position,
           metadata: node.label ? { label: node.label } : {},
