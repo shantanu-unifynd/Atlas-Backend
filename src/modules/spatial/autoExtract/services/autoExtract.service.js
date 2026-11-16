@@ -57,24 +57,10 @@ async function persist(buildingId, floorId, atlas) {
       },
     });
 
-    const mpm = await tx.mapPresentationModel.create({
-      data: {
-        floorId,
-        version: nextVersion,
-        status: "GENERATED",
-        navigationGraphId: graph.id,
-        data: {
-          coordinateSystem: atlas.coordinateSystem,
-          rooms: atlas.rooms,
-          labels: atlas.labels,
-          source: "auto-extract",
-        },
-      },
-    });
-
     // Create nodes and capture their real ids so edges can be remapped from the
     // extractor's temporary ids (n1, n2, …).
     const idMap = new Map();
+    const createdNodes = [];
     for (const node of atlas.graph.nodes) {
       const created = await tx.navigationNode.create({
         data: {
@@ -86,6 +72,7 @@ async function persist(buildingId, floorId, atlas) {
         },
       });
       idMap.set(node.id, created.id);
+      createdNodes.push(created);
     }
 
     // Walkways are two-way: persist both directed rows (as the manual authoring
@@ -103,6 +90,43 @@ async function persist(buildingId, floorId, atlas) {
     if (edgeRows.length) {
       await tx.navigationEdge.createMany({ data: edgeRows });
     }
+    const createdEdges = await tx.navigationEdge.findMany({ where: { graphId: graph.id } });
+
+    // The client renders ENTIRELY from the MPM payload, so the graph must be
+    // embedded in data.graph in the same shape mapModel.service emits —
+    // without it WayfindingPage shows "Wayfinding isn't available".
+    const graphData = {
+      navigationGraphId: graph.id,
+      status: graph.status,
+      nodes: createdNodes.map((n) => ({
+        id: n.id,
+        type: n.nodeType,
+        position: n.position,
+        label: (n.metadata && n.metadata.label) || null,
+      })),
+      edges: createdEdges.map((e) => ({
+        id: e.id,
+        source: e.sourceNodeId,
+        target: e.targetNodeId,
+        cost: e.traversalCost,
+      })),
+    };
+
+    const mpm = await tx.mapPresentationModel.create({
+      data: {
+        floorId,
+        version: nextVersion,
+        status: "GENERATED",
+        navigationGraphId: graph.id,
+        data: {
+          coordinateSystem: atlas.coordinateSystem,
+          rooms: atlas.rooms,
+          labels: atlas.labels,
+          graph: graphData,
+          source: "auto-extract",
+        },
+      },
+    });
 
     return { mapModelId: mpm.id, mapModelVersion: nextVersion, graphId: graph.id };
   });
