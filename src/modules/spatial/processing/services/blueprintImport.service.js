@@ -26,6 +26,12 @@ const SUPPORTED_MIME_TYPES = [
   // natively via PyMuPDF. The legacy Node "Process Blueprint" path does not
   // parse PDF; use "Extract automatically" for PDFs.
   "application/pdf",
+  // Raster photos/scans — the auto-extract pipeline ingests these directly
+  // (labels via OCR). Same caveat as PDF: auto-extract only.
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/bmp",
 ];
 
 // Browsers commonly send .dxf/.ifc uploads as application/octet-stream (neither
@@ -37,6 +43,11 @@ const EXTENSION_MIME_TYPES = {
   ".dxf": "image/vnd.dxf",
   ".ifc": "application/x-ifc",
   ".pdf": "application/pdf",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".bmp": "image/bmp",
 };
 
 function resolveMimeType(file) {
