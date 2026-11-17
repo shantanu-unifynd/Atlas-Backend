@@ -60,6 +60,7 @@ model Floor {
   blueprint        Blueprint?
   blueprintImports BlueprintImport[]
   navigationGraphs NavigationGraph[]
+  navigationNodes  NavigationNode[]
   mapPresentationModels MapPresentationModel[]
   mapRoomOverrides MapRoomOverride[]
 
@@ -686,6 +687,12 @@ model NavigationNode {
   graphId          String               @map("graph_id") @db.Uuid
   candidateId      String?              @unique @map("candidate_id") @db.Uuid
   semanticObjectId String?              @unique @map("semantic_object_id") @db.Uuid
+  // Multi-floor (M1, Option A): the floor this node physically sits on. Nullable
+  // so single-floor graphs and existing rows are unaffected; set on nodes in a
+  // building-level graph (NavigationGraph.floorId = null) so cross-floor routing
+  // knows which floor each node belongs to. A VERTICAL NavigationEdge linking two
+  // such nodes is the stair/lift/escalator transition — no separate table needed.
+  floorId          String?              @map("floor_id") @db.Uuid
   source           NavigationNodeSource @default(AUTO)
   nodeType         String               @map("node_type")
   position         Json
@@ -697,6 +704,7 @@ model NavigationNode {
   graph          NavigationGraph      @relation(fields: [graphId], references: [id], onDelete: Cascade)
   candidate      NavigationCandidate? @relation(fields: [candidateId], references: [id], onDelete: Cascade)
   semanticObject SemanticModel?       @relation(fields: [semanticObjectId], references: [id], onDelete: Cascade)
+  floor          Floor?               @relation(fields: [floorId], references: [id], onDelete: Cascade)
 
   edgesAsSource NavigationEdge[] @relation("NavigationEdgeSourceNode")
   edgesAsTarget NavigationEdge[] @relation("NavigationEdgeTargetNode")
@@ -709,6 +717,7 @@ model NavigationNode {
 
   @@index([graphId])
   @@index([nodeType])
+  @@index([floorId])
   @@map("navigation_nodes")
 }
 
