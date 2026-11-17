@@ -52,6 +52,7 @@ function toNavigationNode(record) {
     source: record.source,
     nodeType: record.nodeType,
     position: record.position,
+    floorId: record.floorId,
     metadata: record.metadata,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
