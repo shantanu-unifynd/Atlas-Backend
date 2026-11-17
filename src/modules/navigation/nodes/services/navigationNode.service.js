@@ -169,7 +169,7 @@ async function createManualNode(graphId, body = {}) {
     throw notFoundError("Navigation Graph not found");
   }
 
-  const { nodeType, position, label, metadata } = body;
+  const { nodeType, position, label, metadata, floorId } = body;
   const errors = [];
 
   if (!nodeType || typeof nodeType !== "string") {
@@ -178,6 +178,10 @@ async function createManualNode(graphId, body = {}) {
 
   if (!isValidPosition(position)) {
     errors.push("position is required and must be an object with numeric x and y");
+  }
+
+  if (floorId !== undefined && floorId !== null && typeof floorId !== "string") {
+    errors.push("floorId must be a string when provided");
   }
 
   if (errors.length > 0) {
@@ -193,6 +197,10 @@ async function createManualNode(graphId, body = {}) {
         source: "MANUAL",
         nodeType,
         position,
+        // Which floor this node sits on (M1). Required for connectors added to a
+        // building's transition graph so they can be paired across floors; left
+        // undefined for single-floor graphs, where the floor is the graph's.
+        ...(floorId !== undefined ? { floorId } : {}),
         metadata: {
           ...(metadata || {}),
           ...(label !== undefined ? { label } : {}),
