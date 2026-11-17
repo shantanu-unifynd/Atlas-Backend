@@ -66,10 +66,24 @@ async function autoConnect(req, res, next) {
   }
 }
 
+async function pairConnectors(req, res, next) {
+  try {
+    const result = await navigationEdgeService.pairConnectors(req.params.graphId, req.body);
+    return successResponse(res, {
+      statusCode: 201,
+      message: "Vertical connectors paired successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   generateEdges,
   getEdges,
   createManualEdge,
   deleteManualEdge,
   autoConnect,
+  pairConnectors,
 };

@@ -312,10 +312,118 @@ async function autoConnectEdges(graphId, body = {}) {
   return { created: rows.length, spineCount: spine.length, attachedNodes: rest.length };
 }
 
+// Multi-floor pairing (M2'b). Admin-confirmed cross-floor pairing of two
+// vertical-connector nodes (e.g. "this lift on F1 is the same shaft as that
+// lift on F2") in the building transition graph. Fully automatic pairing was
+// prototyped and proved unreliable (floors don't co-register, connector counts
+// differ), so this is a deliberate human confirmation, not a guess.
+//
+// Creates BOTH directed VERTICAL edges (a shaft is walkable up and down) in one
+// transaction, tagged metadata.source = "MANUAL" so deleteManualEdge can unpair
+// them. Guards reject the mistakes a human can make: same node, cross-graph,
+// non-connector node, SAME floor (not a cross-floor link), or mismatched type
+// (a lift should pair with a lift, not a staircase).
+const CONNECTOR_NODE_TYPES = new Set(["ELEVATOR", "STAIR", "ESCALATOR"]);
+
+async function pairConnectors(graphId, body = {}) {
+  const graph = await navigationGraphRepository.findById(graphId);
+
+  if (!graph) {
+    throw notFoundError("Navigation Graph not found");
+  }
+
+  const { sourceNodeId, targetNodeId, traversalCost, metadata } = body;
+  const errors = [];
+
+  if (!sourceNodeId) errors.push("sourceNodeId is required");
+  if (!targetNodeId) errors.push("targetNodeId is required");
+
+  if (errors.length > 0) {
+    throw validationError(errors);
+  }
+
+  if (sourceNodeId === targetNodeId) {
+    throw validationError(["A connector cannot be paired with itself"]);
+  }
+
+  if (
+    traversalCost !== undefined &&
+    (typeof traversalCost !== "number" || !Number.isFinite(traversalCost) || traversalCost < 0)
+  ) {
+    throw validationError(["traversalCost must be a non-negative number"]);
+  }
+
+  const [sourceNode, targetNode] = await Promise.all([
+    navigationNodeRepository.findById(sourceNodeId),
+    navigationNodeRepository.findById(targetNodeId),
+  ]);
+
+  if (!sourceNode || sourceNode.graphId !== graphId) {
+    throw validationError(["sourceNodeId does not reference a node in this graph"]);
+  }
+
+  if (!targetNode || targetNode.graphId !== graphId) {
+    throw validationError(["targetNodeId does not reference a node in this graph"]);
+  }
+
+  if (!CONNECTOR_NODE_TYPES.has(sourceNode.nodeType) || !CONNECTOR_NODE_TYPES.has(targetNode.nodeType)) {
+    throw validationError(["Both nodes must be vertical connectors (ELEVATOR, STAIR, or ESCALATOR)"]);
+  }
+
+  if (sourceNode.nodeType !== targetNode.nodeType) {
+    throw validationError([
+      `Connector types must match to pair (${sourceNode.nodeType} vs ${targetNode.nodeType})`,
+    ]);
+  }
+
+  // The whole point is to link DIFFERENT floors. Same-floor (or both-null) pairs
+  // are a mistake, not a vertical transition.
+  if (!sourceNode.floorId || !targetNode.floorId) {
+    throw validationError(["Both connector nodes must be assigned to a floor to be paired"]);
+  }
+
+  if (sourceNode.floorId === targetNode.floorId) {
+    throw validationError(["A vertical connector must link two different floors"]);
+  }
+
+  // A shaft is traversable both ways; cost is symmetric. traversalCost defaults
+  // to 1 here — preference-aware costs (AVOID_STAIRS / PREFER_ELEVATORS) are
+  // applied by the routing cost policy in M3, not baked in at pairing time.
+  const cost = typeof traversalCost === "number" ? traversalCost : 1;
+  const edgeMeta = { ...(metadata || {}), source: "MANUAL", transition: "VERTICAL" };
+  const rows = [
+    { graphId, sourceNodeId, targetNodeId, edgeType: "VERTICAL", traversalCost: cost, accessibility: {}, metadata: edgeMeta },
+    { graphId, sourceNodeId: targetNodeId, targetNodeId: sourceNodeId, edgeType: "VERTICAL", traversalCost: cost, accessibility: {}, metadata: edgeMeta },
+  ];
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await navigationEdgeRepository.createMany(rows, tx);
+      await statisticsSync.resyncGraphStatistics(graphId, tx);
+    });
+  } catch (error) {
+    if (error?.code === "P2002") {
+      throw conflictError("These two connectors are already paired");
+    }
+    throw error;
+  }
+
+  const persisted = await navigationEdgeRepository.findAllByGraphId(graphId);
+  const pairEdges = persisted.filter(
+    (e) =>
+      e.edgeType === "VERTICAL" &&
+      ((e.sourceNodeId === sourceNodeId && e.targetNodeId === targetNodeId) ||
+        (e.sourceNodeId === targetNodeId && e.targetNodeId === sourceNodeId))
+  );
+
+  return { paired: true, nodeType: sourceNode.nodeType, edges: pairEdges.map(toNavigationEdge) };
+}
+
 module.exports = {
   generateEdges,
   getEdges,
   createManualEdge,
   deleteManualEdge,
   autoConnectEdges,
+  pairConnectors,
 };
