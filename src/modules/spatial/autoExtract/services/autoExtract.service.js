@@ -12,6 +12,11 @@ const floorRepository = require("../../../../repositories/floor/floor.repository
 
 const EXTRACT_URL = process.env.EXTRACT_URL || "http://localhost:5600";
 const PIPELINE_VERSION = "auto-extract-0.1";
+// Multi-floor (M2'a): one graph per building, floorId = null, holds the
+// vertical-connector nodes from every floor plus the VERTICAL edges that link
+// them across floors (per-floor graphs can't hold a cross-floor edge). This
+// pipelineVersion is the discriminator that identifies it.
+const TRANSITION_PIPELINE_VERSION = "multi-floor-transition-0.1";
 
 function httpError(message, statusCode) {
   const err = new Error(message);
@@ -37,6 +42,59 @@ async function callExtractor(buffer, filename) {
     throw httpError(`Extractor failed (${res.status}): ${detail}`.trim(), 502);
   }
   return res.json();
+}
+
+// Persist the floor's detected vertical connectors (stairs/lifts/escalators)
+// into the building's transition graph so they can later be paired across
+// floors. Detection-only here: each node's position is the TEXT-LABEL anchor
+// (not the shaft centre) and no VERTICAL edges are created — pairing is the
+// admin-confirmed step M2'b (fully automatic pairing proved unreliable).
+//
+// Idempotent per floor: a re-extraction drops this floor's existing connector
+// nodes (cascade removes any VERTICAL edges on them) and re-inserts from the
+// fresh result. NOTE for M2'b: that wipes admin pairings for the re-extracted
+// floor — M2'b must re-pair or preserve unmoved connectors on re-extract.
+async function persistConnectors(tx, buildingId, floorId, connectors) {
+  if (!connectors || connectors.length === 0) {
+    return { connectorGraphId: null, connectorsPersisted: 0 };
+  }
+
+  let graph = await tx.navigationGraph.findFirst({
+    where: {
+      buildingId,
+      floorId: null,
+      pipelineVersion: TRANSITION_PIPELINE_VERSION,
+    },
+  });
+  if (!graph) {
+    graph = await tx.navigationGraph.create({
+      data: {
+        buildingId,
+        floorId: null,
+        status: "READY",
+        pipelineVersion: TRANSITION_PIPELINE_VERSION,
+        metadata: { kind: "transition" },
+      },
+    });
+  }
+
+  await tx.navigationNode.deleteMany({ where: { graphId: graph.id, floorId } });
+
+  const rows = connectors.map((c) => ({
+    graphId: graph.id,
+    floorId,
+    source: "AUTO",
+    nodeType: c.type,
+    position: c.position,
+    metadata: {
+      label: c.label || null,
+      connectorId: c.id,
+      detection: "label-anchor",
+    },
+  }));
+  await tx.navigationNode.createMany({ data: rows });
+
+  return { connectorGraphId: graph.id, connectorsPersisted: rows.length };
 }
 
 // Persist the extractor's atlas payload: a new map model (rooms/labels) and a
@@ -128,7 +186,21 @@ async function persist(buildingId, floorId, atlas) {
       },
     });
 
-    return { mapModelId: mpm.id, mapModelVersion: nextVersion, graphId: graph.id };
+    // Same transaction as the floor graph/MPM so a floor never lands half
+    // persisted. atlas.connectors is the M0 extractor output (may be empty).
+    const connResult = await persistConnectors(
+      tx,
+      buildingId,
+      floorId,
+      atlas.connectors
+    );
+
+    return {
+      mapModelId: mpm.id,
+      mapModelVersion: nextVersion,
+      graphId: graph.id,
+      ...connResult,
+    };
   });
 }
 
