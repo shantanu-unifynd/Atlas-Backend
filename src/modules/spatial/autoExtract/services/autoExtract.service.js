@@ -234,6 +234,112 @@ async function persist(buildingId, floorId, atlas) {
   });
 }
 
+// P4 Phase 3 — carry the admin's walkway nudges (P4) onto a freshly re-extracted
+// graph so a re-extraction doesn't silently wipe them. Each re-extraction writes
+// a NEW per-floor graph, so admin-touched edges on the previous graph must be
+// re-applied here. The plan is identical on re-extract, so endpoints are remapped
+// by POSITION: a nudge edge's endpoints map to the new graph's nearest nodes, a
+// re-created manual node maps directly. Best-effort and isolated (own
+// transaction, called inside a try/catch) so a failure can never break the
+// extraction itself.
+const CARRY_RADIUS = 50; // source units — endpoints should land near-exactly
+
+async function preserveAdminWalkwayEdits(prevGraphId, newGraphId) {
+  if (!prevGraphId || prevGraphId === newGraphId) return { carried: 0 };
+
+  return prisma.$transaction(async (tx) => {
+    const [prevNodes, prevEdges, newNodes] = await Promise.all([
+      tx.navigationNode.findMany({ where: { graphId: prevGraphId } }),
+      tx.navigationEdge.findMany({ where: { graphId: prevGraphId } }),
+      tx.navigationNode.findMany({ where: { graphId: newGraphId } }),
+    ]);
+
+    const isAdminEdge = (e) =>
+      (e.metadata && e.metadata.source === "MANUAL") || (e.metadata && e.metadata.hidden);
+    const adminEdges = prevEdges.filter(isAdminEdge);
+    if (adminEdges.length === 0) return { carried: 0 };
+
+    const prevById = new Map(prevNodes.map((n) => [n.id, n]));
+    const nearestNew = (pos) => {
+      if (!pos) return null;
+      let best = null;
+      let bd = Infinity;
+      for (const n of newNodes) {
+        if (!n.position) continue;
+        const d = Math.hypot(n.position.x - pos.x, n.position.y - pos.y);
+        if (d < bd) {
+          bd = d;
+          best = n;
+        }
+      }
+      return best && bd <= CARRY_RADIUS ? best : null;
+    };
+
+    // Re-create any admin-authored MANUAL nodes on the new graph (the current
+    // nudge tool only adds edges between existing nodes, but handle nodes too).
+    const remap = new Map();
+    for (const mn of prevNodes.filter((n) => n.source === "MANUAL")) {
+      const created = await tx.navigationNode.create({
+        data: {
+          graphId: newGraphId,
+          source: "MANUAL",
+          nodeType: mn.nodeType,
+          position: mn.position,
+          floorId: mn.floorId ?? null,
+          metadata: mn.metadata || {},
+        },
+      });
+      remap.set(mn.id, created.id);
+    }
+
+    const resolve = (oldId) => {
+      if (remap.has(oldId)) return remap.get(oldId);
+      const near = nearestNew(prevById.get(oldId)?.position);
+      return near ? near.id : null;
+    };
+
+    const newEdges = await tx.navigationEdge.findMany({ where: { graphId: newGraphId } });
+    const newEdgeByPair = new Map(newEdges.map((e) => [`${e.sourceNodeId}->${e.targetNodeId}`, e]));
+
+    let carried = 0;
+    for (const e of adminEdges) {
+      const s = resolve(e.sourceNodeId);
+      const t = resolve(e.targetNodeId);
+      if (!s || !t || s === t) continue;
+
+      if (e.metadata && e.metadata.hidden) {
+        // Admin removed this AUTO edge → re-hide the matching fresh AUTO edge so
+        // the stray stays trimmed.
+        const match = newEdgeByPair.get(`${s}->${t}`);
+        if (match && !(match.metadata && match.metadata.hidden)) {
+          await tx.navigationEdge.update({
+            where: { id: match.id },
+            data: { metadata: { ...(match.metadata || {}), hidden: true, adminEdited: true } },
+          });
+          carried += 1;
+        }
+      } else if (!newEdgeByPair.has(`${s}->${t}`)) {
+        // Admin-added MANUAL walkway → re-create it (skip if already present).
+        await tx.navigationEdge.create({
+          data: {
+            graphId: newGraphId,
+            sourceNodeId: s,
+            targetNodeId: t,
+            edgeType: e.edgeType || "WALKWAY",
+            length: e.length ?? null,
+            traversalCost: e.traversalCost ?? 1,
+            accessibility: e.accessibility || {},
+            metadata: { ...(e.metadata || {}), source: "MANUAL", carriedForward: true },
+          },
+        });
+        carried += 1;
+      }
+    }
+
+    return { carried };
+  });
+}
+
 async function autoExtractFloor(buildingId, floorId) {
   const floor = await floorRepository.findById(floorId);
   if (!floor || floor.buildingId !== buildingId) {
@@ -252,9 +358,26 @@ async function autoExtractFloor(buildingId, floorId) {
     current.originalFilename
   );
 
+  // Capture the floor's current auto graph BEFORE persist creates the new one,
+  // so we can carry the admin's nudges forward onto the fresh graph.
+  const prevGraph = await prisma.navigationGraph.findFirst({
+    where: { floorId, pipelineVersion: PIPELINE_VERSION },
+    orderBy: { createdAt: "desc" },
+  });
+
   const persisted = await persist(buildingId, floorId, atlas);
 
-  return { report, flags, ...persisted };
+  let nudgesCarried = 0;
+  try {
+    const result = await preserveAdminWalkwayEdits(prevGraph?.id || null, persisted.graphId);
+    nudgesCarried = result.carried;
+  } catch (err) {
+    // Non-fatal: extraction already succeeded; just log that preservation failed.
+    // eslint-disable-next-line no-console
+    console.error("preserveAdminWalkwayEdits failed (non-fatal):", err?.message);
+  }
+
+  return { report, flags, ...persisted, nudgesCarried };
 }
 
 module.exports = { autoExtractFloor };
