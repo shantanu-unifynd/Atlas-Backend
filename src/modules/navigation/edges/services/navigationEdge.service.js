@@ -208,13 +208,23 @@ async function deleteManualEdge(graphId, edgeId) {
     throw notFoundError("Navigation edge not found");
   }
 
-  if (edge.metadata?.source !== "MANUAL") {
-    throw conflictError("Only manually authored edges can be deleted");
-  }
+  const isManual = edge.metadata?.source === "MANUAL";
 
   await prisma.$transaction(async (tx) => {
-    await navigationEdgeRepository.deleteById(edgeId, tx);
-
+    if (isManual) {
+      // Admin-authored → hard delete.
+      await navigationEdgeRepository.deleteById(edgeId, tx);
+    } else {
+      // Auto-generated walkway edge (a stray/leak the admin is trimming via the
+      // P4 nudge tool): soft-hide it (tombstone) instead of hard-deleting, so
+      // routing skips it and a re-extraction preserves the removal rather than
+      // resurrecting it. Mirrors how AUTO connectors are removed.
+      await navigationEdgeRepository.update(
+        edgeId,
+        { metadata: { ...(edge.metadata || {}), hidden: true, adminEdited: true } },
+        tx
+      );
+    }
     await statisticsSync.resyncGraphStatistics(graphId, tx);
   });
 }

@@ -39,7 +39,10 @@ async function loadGraphForRouting(graphId, originNodeId, destinationNodeId) {
   }
 
   const nodes = await navigationNodeRepository.findAllByGraphId(graphId);
-  const edges = await navigationEdgeRepository.findAllByGraphId(graphId);
+  const allEdges = await navigationEdgeRepository.findAllByGraphId(graphId);
+  // Skip edges an admin soft-removed via the P4 nudge tool (stray/leak AUTO
+  // walkway edges tombstoned with metadata.hidden) — routes must not use them.
+  const edges = allEdges.filter((e) => !e.metadata?.hidden);
 
   const nodeIds = new Set(nodes.map((node) => node.id));
 
