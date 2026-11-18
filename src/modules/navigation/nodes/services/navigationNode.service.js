@@ -15,6 +15,13 @@ const normalizedBlueprintRepository = require("../../../../repositories/normaliz
 // slash, digits, optional trailing letter. Overridable per request.
 const DEFAULT_LABEL_PATTERN = "^[A-Za-z]{1,4}\\/\\d+[A-Za-z]?$";
 
+// Vertical-connector node types. Connectors are the one kind of AUTO node an
+// admin is allowed to correct (retype / remove) — see updateManualNode /
+// deleteManualNode — because detection can be wrong or a false positive, and
+// re-running the whole extraction just to fix one is destructive. Regular
+// walkway nodes stay locked.
+const CONNECTOR_NODE_TYPES = new Set(["ELEVATOR", "STAIR", "ESCALATOR"]);
+
 // An SVG element's transform "matrix(a,b,c,d,e,f)" maps its local origin (0,0)
 // to (e,f); for a label anchored at its origin that IS the label's position.
 function positionFromTransform(transform) {
@@ -217,9 +224,12 @@ async function createManualNode(graphId, body = {}) {
   return toNavigationNode(record);
 }
 
-// Move / rename / retype a manual node. AUTO nodes are rejected (409): they
-// are deterministic products of the pipeline and must stay verbatim copies of
-// their candidate.
+// Move / rename / retype a manual node. AUTO nodes are normally rejected (409):
+// they are deterministic products of the pipeline and must stay verbatim copies
+// of their candidate. The one exception is a vertical CONNECTOR: detection can
+// mis-type one, and re-extracting the whole floor to fix it is destructive, so
+// an admin may retype an AUTO connector. Editing one flags it `adminEdited` so
+// re-extraction preserves the correction instead of overwriting it.
 async function updateManualNode(graphId, nodeId, body = {}) {
   const node = await navigationNodeRepository.findById(nodeId);
 
@@ -227,7 +237,10 @@ async function updateManualNode(graphId, nodeId, body = {}) {
     throw notFoundError("Navigation node not found");
   }
 
-  if (node.source !== "MANUAL") {
+  const editingAutoConnector =
+    node.source === "AUTO" && CONNECTOR_NODE_TYPES.has(node.nodeType);
+
+  if (node.source !== "MANUAL" && !editingAutoConnector) {
     throw conflictError("Only manually authored nodes can be edited");
   }
 
@@ -248,11 +261,13 @@ async function updateManualNode(graphId, nodeId, body = {}) {
     data.nodeType = nodeType;
   }
 
-  if (metadata !== undefined || label !== undefined) {
+  if (metadata !== undefined || label !== undefined || editingAutoConnector) {
     data.metadata = {
       ...(node.metadata || {}),
       ...(metadata || {}),
       ...(label !== undefined ? { label } : {}),
+      // Mark an admin-corrected AUTO connector so re-extraction keeps the fix.
+      ...(editingAutoConnector ? { adminEdited: true } : {}),
     };
   }
 
@@ -271,14 +286,33 @@ async function updateManualNode(graphId, nodeId, body = {}) {
   return toNavigationNode(record);
 }
 
-// Delete a manual node. Its edges are removed by the DB-level ON DELETE
-// CASCADE on navigation_edges. AUTO nodes are rejected (409) to keep the
-// generated node set intact.
+// Remove a node. A manually authored node is hard-deleted (its edges go via the
+// DB-level ON DELETE CASCADE). An AUTO vertical CONNECTOR is instead removed
+// *non-destructively*: the extractor would regenerate it on the next
+// re-extraction, so rather than hard-deleting we tombstone it (`hidden` +
+// `adminEdited`) — persistConnectors preserves the tombstone and skips the
+// coincident fresh connector, so a removed false positive stays gone. Other
+// AUTO nodes are still rejected (409) to keep the generated node set intact.
 async function deleteManualNode(graphId, nodeId) {
   const node = await navigationNodeRepository.findById(nodeId);
 
   if (!node || node.graphId !== graphId) {
     throw notFoundError("Navigation node not found");
+  }
+
+  const isAutoConnector =
+    node.source === "AUTO" && CONNECTOR_NODE_TYPES.has(node.nodeType);
+
+  if (isAutoConnector) {
+    await prisma.$transaction(async (tx) => {
+      await navigationNodeRepository.update(
+        nodeId,
+        { metadata: { ...(node.metadata || {}), hidden: true, adminEdited: true } },
+        tx
+      );
+      await statisticsSync.resyncGraphStatistics(graphId, tx);
+    });
+    return;
   }
 
   if (node.source !== "MANUAL") {

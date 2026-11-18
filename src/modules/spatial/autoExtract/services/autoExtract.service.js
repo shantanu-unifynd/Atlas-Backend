@@ -78,21 +78,51 @@ async function persistConnectors(tx, buildingId, floorId, connectors) {
     });
   }
 
-  await tx.navigationNode.deleteMany({ where: { graphId: graph.id, floorId } });
+  // Preserve anything the admin authored or corrected on this floor across a
+  // re-extraction: manually added connectors (source MANUAL), retyped ones, and
+  // tombstoned removals (both carry metadata.adminEdited). Only the untouched
+  // AUTO connectors are refreshed from the new extraction.
+  const existing = await tx.navigationNode.findMany({
+    where: { graphId: graph.id, floorId },
+  });
+  const isAdminTouched = (n) =>
+    n.source === "MANUAL" || (n.metadata && n.metadata.adminEdited);
+  const preserved = existing.filter(isAdminTouched);
+  const refreshableIds = existing.filter((n) => !isAdminTouched(n)).map((n) => n.id);
+  if (refreshableIds.length > 0) {
+    await tx.navigationNode.deleteMany({ where: { id: { in: refreshableIds } } });
+  }
 
-  const rows = connectors.map((c) => ({
-    graphId: graph.id,
-    floorId,
-    source: "AUTO",
-    nodeType: c.type,
-    position: c.position,
-    metadata: {
-      label: c.label || null,
-      connectorId: c.id,
-      detection: "label-anchor",
-    },
-  }));
-  await tx.navigationNode.createMany({ data: rows });
+  // Skip a freshly detected connector that coincides with a preserved node: it
+  // is already represented (a retype at that spot) or was deliberately removed
+  // (a tombstone), so re-adding it would duplicate or resurrect it. Same-shaft
+  // connectors land within a few px; 40 source units is a generous radius.
+  const COINCIDE_RADIUS = 40;
+  const coincidesWithPreserved = (c) =>
+    preserved.some(
+      (p) =>
+        p.position &&
+        Math.hypot(p.position.x - c.position.x, p.position.y - c.position.y) <=
+          COINCIDE_RADIUS
+    );
+
+  const rows = connectors
+    .filter((c) => !coincidesWithPreserved(c))
+    .map((c) => ({
+      graphId: graph.id,
+      floorId,
+      source: "AUTO",
+      nodeType: c.type,
+      position: c.position,
+      metadata: {
+        label: c.label || null,
+        connectorId: c.id,
+        detection: "label-anchor",
+      },
+    }));
+  if (rows.length > 0) {
+    await tx.navigationNode.createMany({ data: rows });
+  }
 
   return { connectorGraphId: graph.id, connectorsPersisted: rows.length };
 }
