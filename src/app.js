@@ -18,6 +18,7 @@ const navigationCandidateRoutes = require("./modules/navigation/candidates/route
 const navigationNodeRoutes = require("./modules/navigation/nodes/routes/navigationNode.routes");
 const navigationEdgeRoutes = require("./modules/navigation/edges/routes/navigationEdge.routes");
 const graphValidationRoutes = require("./modules/navigation/validation/routes/graphValidation.routes");
+const buildingNavigationRoutes = require("./modules/navigation/building/routes/buildingNavigation.routes");
 const routeRoutes = require("./modules/routing/route/routes/route.routes");
 const costModelRoutes = require("./modules/navigation/costs/routes/costModel.routes");
 const routingRoutes = require("./modules/navigation/routing/routes/routing.routes");
@@ -51,6 +52,7 @@ app.use((req, res, next) => {
 app.use("/api/buildings", buildingRoutes);
 app.use("/api/buildings/:buildingId/floors", floorRoutes);
 app.use("/api/buildings/:buildingId/floors/:floorId/auto-extract", autoExtractRoutes);
+app.use("/api/buildings/:buildingId/navigation", buildingNavigationRoutes);
 app.use("/api/floors/:floorId/assets", assetRoutes);
 app.use("/api/floors/:floorId/blueprint", blueprintRoutes);
 app.use("/api/blueprints/:blueprintId/objects", objectRoutes.nestedRouter);
