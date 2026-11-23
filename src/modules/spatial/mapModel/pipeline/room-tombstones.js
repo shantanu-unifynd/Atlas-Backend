@@ -57,6 +57,10 @@ function matchTombstone(tombstone, rooms, tol) {
     if (tombstone.area != null && a != null) {
       const denom = Math.max(Math.abs(tombstone.area), 1e-9);
       if (Math.abs(a - tombstone.area) / denom > tol.areaRatio) return false;
+    } else if (tombstone.area == null && a != null) {
+      // A point-room tombstone (no area) must not match a sized polygon room —
+      // otherwise a point sitting at a big room's centroid would suppress it.
+      return false;
     }
     return true;
   });

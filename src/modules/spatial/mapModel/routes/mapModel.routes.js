@@ -15,6 +15,8 @@ router.post("/rooms", mapModelController.createRoomOverride);
 // "Remove room" (soft-delete + undo). Flag-gated in the controller (404 when off).
 // `removed` is registered before the :overrideId routes so it is not shadowed.
 router.get("/rooms/removed", mapModelController.listRemovedRooms);
+router.get("/rooms/:roomId/contained", mapModelController.listContainedRooms);
+router.post("/rooms/:roomId/remove-contained", mapModelController.removeContainedRooms);
 router.post("/rooms/:roomId/remove", mapModelController.removeRoom);
 router.post("/rooms/:roomId/restore", mapModelController.restoreRoom);
 router.patch("/rooms/:overrideId", mapModelController.updateRoomOverride);

@@ -16,6 +16,7 @@ const mapRoomOverrideRepository = require("../../../../repositories/mapRoomOverr
 const { canTransition, GENERATED, PUBLISHED } = require("../pipeline/lifecycle");
 const roomTombstoneRepository = require("../../../../repositories/roomTombstone/roomTombstone.repository");
 const { suppressedRoomIds, filterMpmData, roomCentroid, roomArea, matchTombstone } = require("../pipeline/room-tombstones");
+const { containedRoomIds } = require("../pipeline/room-containment");
 const { tombstoneMatchTolerances, SYSTEM_ACTOR } = require("../../../../config/roomRemoval");
 
 // MPM-01 — framework only. Assembles the model envelope: metadata + version +
@@ -565,6 +566,65 @@ async function listRemovedRooms(floorId) {
   }));
 }
 
+// Preview: the rooms strictly inside `roomId` (engulfed), for the "Remove N
+// inside…" count + confirm.
+async function listContainedRooms(floorId, roomId) {
+  await ensureFloorExists(floorId);
+  const latest = await mapPresentationModelRepository.findLatestByFloorId(floorId);
+  const rooms = (latest && latest.data && Array.isArray(latest.data.rooms) && latest.data.rooms) || [];
+  const container = rooms.find((r) => r.id === roomId);
+  if (!container) throw validationError("Room not found in the current map model");
+  const byId = new Map(rooms.map((r) => [r.id, r]));
+  const ids = containedRoomIds(container, rooms);
+  return {
+    containerId: roomId,
+    count: ids.length,
+    rooms: ids.map((id) => ({ roomId: id, name: (byId.get(id) || {}).name || null })),
+  };
+}
+
+// Bulk-remove every room engulfed by `roomId`: one tombstone per contained room,
+// then a SINGLE regenerate. Idempotent (already-removed rooms are skipped).
+// Returns the removed ids so the caller can offer one Undo (restore each).
+async function removeContainedRooms(floorId, roomId, { reason = null, actor = SYSTEM_ACTOR } = {}) {
+  await ensureFloorExists(floorId);
+  const latest = await mapPresentationModelRepository.findLatestByFloorId(floorId);
+  const rooms = (latest && latest.data && Array.isArray(latest.data.rooms) && latest.data.rooms) || [];
+  const container = rooms.find((r) => r.id === roomId);
+  if (!container) throw validationError("Room not found in the current map model");
+  const byId = new Map(rooms.map((r) => [r.id, r]));
+  const ids = containedRoomIds(container, rooms);
+
+  const removedRoomIds = [];
+  let createdAny = false;
+  for (const id of ids) {
+    const already = await roomTombstoneRepository.findActiveByFloorAndRoom(floorId, id);
+    removedRoomIds.push(id);
+    if (already) continue;
+    const room = byId.get(id);
+    const c = roomCentroid(room);
+    await roomTombstoneRepository.create({
+      floorId,
+      roomId: id,
+      roomKind: id.startsWith("room-manual-") ? "MANUAL" : "AUTO",
+      centroidX: c ? c.x : null,
+      centroidY: c ? c.y : null,
+      area: roomArea(room),
+      roomSnapshot: room,
+      reason: reason || `bulk: inside ${roomId}`,
+      deletedBy: actor,
+    });
+    createdAny = true;
+  }
+
+  let mpmVersion = latest ? latest.version : null;
+  if (createdAny) {
+    const mpm = await generate(floorId); // one rebuild for the whole batch
+    mpmVersion = mpm.version;
+  }
+  return { containerId: roomId, count: removedRoomIds.length, removedRoomIds, mpmVersion };
+}
+
 module.exports = {
   generate,
   getByFloorId,
@@ -576,4 +636,6 @@ module.exports = {
   removeRoom,
   restoreRoom,
   listRemovedRooms,
+  listContainedRooms,
+  removeContainedRooms,
 };

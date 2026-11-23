@@ -70,7 +70,10 @@ async function cleanupByName(name) {
   try { await svc.removeRoom(fl.id, "room-does-not-exist"); } catch (e) { threw = e.statusCode === 400; }
   ok("removeRoom on a missing room throws 400", threw);
 
-  // controller flag gate (flag OFF -> 404)
+  // controller flag gate (flag OFF -> 404). Force the flag off here: requiring
+  // the service loads config/dotenv, which re-applies ROOM_REMOVAL_ENABLED from
+  // a local .env after the top-level delete, so set it explicitly.
+  process.env.ROOM_REMOVAL_ENABLED = "false";
   await new Promise((resolve) => {
     ctrl.removeRoom({ params: { floorId: fl.id, roomId: target.id }, body: {} }, {}, (err) => {
       ok("controller removeRoom 404 when flag off", err && err.statusCode === 404);

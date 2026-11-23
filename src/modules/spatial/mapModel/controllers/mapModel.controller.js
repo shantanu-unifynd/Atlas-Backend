@@ -120,6 +120,28 @@ async function listRemovedRooms(req, res, next) {
   }
 }
 
+async function listContainedRooms(req, res, next) {
+  try {
+    if (!isRoomRemovalEnabled()) throw featureDisabled();
+    const result = await mapModelService.listContainedRooms(req.params.floorId, req.params.roomId);
+    return successResponse(res, { statusCode: 200, message: "Contained rooms fetched successfully", data: result });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function removeContainedRooms(req, res, next) {
+  try {
+    if (!isRoomRemovalEnabled()) throw featureDisabled();
+    const result = await mapModelService.removeContainedRooms(req.params.floorId, req.params.roomId, {
+      reason: (req.body && req.body.reason) || null,
+    });
+    return successResponse(res, { statusCode: 201, message: "Contained rooms removed successfully", data: result });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   generateMapModel,
   getMapModel,
@@ -131,4 +153,6 @@ module.exports = {
   removeRoom,
   restoreRoom,
   listRemovedRooms,
+  listContainedRooms,
+  removeContainedRooms,
 };
