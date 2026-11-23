@@ -1,5 +1,14 @@
 const mapModelService = require("../services/mapModel.service");
 const { successResponse } = require("../../../../common/utils/apiResponse");
+const { isRoomRemovalEnabled } = require("../../../../config/roomRemoval");
+
+// "Remove room" write endpoints are gated: flag off -> 404 (feature invisible),
+// while read-filtering stays on so existing tombstones keep being respected.
+function featureDisabled() {
+  const err = new Error("Not found");
+  err.statusCode = 404;
+  return err;
+}
 
 async function generateMapModel(req, res, next) {
   try {
@@ -79,6 +88,38 @@ async function deleteRoomOverride(req, res, next) {
   }
 }
 
+async function removeRoom(req, res, next) {
+  try {
+    if (!isRoomRemovalEnabled()) throw featureDisabled();
+    const result = await mapModelService.removeRoom(req.params.floorId, req.params.roomId, {
+      reason: (req.body && req.body.reason) || null,
+    });
+    return successResponse(res, { statusCode: 201, message: "Room removed successfully", data: result });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function restoreRoom(req, res, next) {
+  try {
+    if (!isRoomRemovalEnabled()) throw featureDisabled();
+    const result = await mapModelService.restoreRoom(req.params.floorId, req.params.roomId);
+    return successResponse(res, { statusCode: 200, message: "Room restore processed", data: result });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function listRemovedRooms(req, res, next) {
+  try {
+    if (!isRoomRemovalEnabled()) throw featureDisabled();
+    const result = await mapModelService.listRemovedRooms(req.params.floorId);
+    return successResponse(res, { statusCode: 200, message: "Removed rooms fetched successfully", data: result });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   generateMapModel,
   getMapModel,
@@ -87,4 +128,7 @@ module.exports = {
   createRoomOverride,
   updateRoomOverride,
   deleteRoomOverride,
+  removeRoom,
+  restoreRoom,
+  listRemovedRooms,
 };

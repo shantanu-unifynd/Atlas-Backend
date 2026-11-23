@@ -15,6 +15,10 @@ const navigationEdgeRepository = require("../../../../repositories/navigationEdg
 const graphPreparation = require("../../routing/pipeline/graph-preparation");
 const dijkstraEngine = require("../../routing/pipeline/dijkstra-engine");
 const { assembleBuildingGraph } = require("../pipeline/building-graph-assembler");
+const { buildUnitLinks, allowedUnitGraph } = require("../pipeline/unit-link-edges");
+const roomTombstoneRepository = require("../../../../repositories/roomTombstone/roomTombstone.repository");
+const { filterMpmData } = require("../../../spatial/mapModel/pipeline/room-tombstones");
+const { tombstoneMatchTolerances } = require("../../../../config/roomRemoval");
 
 const ALGORITHM_NAME = "dijkstra";
 // Discriminator of the per-building transition graph (M2'a).
@@ -39,9 +43,24 @@ async function loadBuilding(buildingId) {
 
   const floors = await floorRepository.findAllByBuildingId(buildingId);
   const floorEntries = [];
+  // Part 3D — per-floor rooms (with unit links) kept separate so the public
+  // bundle shape stays unchanged; used only to synthesize two-floor-shop hops.
+  const unitFloorInput = [];
   for (const floor of [...floors].sort((a, b) => (a.level ?? 0) - (b.level ?? 0))) {
     const mpm = await mpmRepository.findLatestPublishedByFloorId(floor.id);
     const graph = mpm?.data?.graph || null;
+    // Read-time tombstone filter (shared predicate) so a removed shop drops out
+    // of cross-floor unit-link synthesis too — no routing through a removed room.
+    let rooms = mpm?.data?.rooms || [];
+    if (mpm?.data && rooms.length) {
+      const tombstones = await roomTombstoneRepository.findActiveByFloorId(floor.id);
+      rooms = filterMpmData(mpm.data, tombstones, tombstoneMatchTolerances).data.rooms || [];
+    }
+    unitFloorInput.push({
+      floorId: floor.id,
+      level: floor.level ?? null,
+      rooms,
+    });
     floorEntries.push({
       floorId: floor.id,
       level: floor.level ?? null,
@@ -89,7 +108,9 @@ async function loadBuilding(buildingId) {
       }));
   }
 
-  return { building, floorEntries, connectors, transitions };
+  const unitLinks = buildUnitLinks(unitFloorInput);
+
+  return { building, floorEntries, connectors, transitions, unitLinks };
 }
 
 async function getBuildingNavigation(buildingId) {
@@ -165,11 +186,23 @@ async function computeBuildingRoute(buildingId, body = {}) {
     );
   }
 
-  const { floorEntries, connectors, transitions } = await loadBuilding(buildingId);
+  const { floorEntries, connectors, transitions, unitLinks } = await loadBuilding(buildingId);
+
+  // Part 3D — index floor nodes so we can locate the origin/destination in
+  // world space and apply the private-connector rule.
+  const nodeIndex = new Map();
+  for (const entry of floorEntries) {
+    for (const node of entry.graph?.nodes || []) {
+      nodeIndex.set(node.id, { position: node.position || null, floorId: entry.floorId });
+    }
+  }
+  const endpoints = [nodeIndex.get(originNodeId), nodeIndex.get(destinationNodeId)].filter(Boolean);
+  const unitGraph = allowedUnitGraph(unitLinks || [], endpoints);
+
   const { nodes, edges, meta } = assembleBuildingGraph({
     floorEntries,
-    connectors,
-    transitions,
+    connectors: [...connectors, ...unitGraph.connectors],
+    transitions: [...transitions, ...unitGraph.transitions],
     preference,
   });
 

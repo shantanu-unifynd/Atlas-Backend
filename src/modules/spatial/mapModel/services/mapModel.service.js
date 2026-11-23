@@ -14,6 +14,9 @@ const { assembleRooms } = require("../pipeline/room-assembler");
 const { extractWalls, extractOpenings, extractLabels } = require("../pipeline/feature-extractor");
 const mapRoomOverrideRepository = require("../../../../repositories/mapRoomOverride/mapRoomOverride.repository");
 const { canTransition, GENERATED, PUBLISHED } = require("../pipeline/lifecycle");
+const roomTombstoneRepository = require("../../../../repositories/roomTombstone/roomTombstone.repository");
+const { suppressedRoomIds, filterMpmData, roomCentroid, roomArea, matchTombstone } = require("../pipeline/room-tombstones");
+const { tombstoneMatchTolerances, SYSTEM_ACTOR } = require("../../../../config/roomRemoval");
 
 // MPM-01 — framework only. Assembles the model envelope: metadata + version +
 // floor reference + placeholders (rooms/walls/labels) + the existing navigation
@@ -110,6 +113,16 @@ async function generate(floorId) {
     ? normalizeGeometry(sources.geometry, sources.normalized)
     : { coordinateSystem: null, primitives: [], stats: { primitiveCount: 0, matchedTransforms: 0 } };
 
+  // Option A — on a floor with no blueprint-geometry sources (e.g. shop-gap
+  // auto-extract), fall back to the latest auto-extract MPM as the base. Without
+  // this, a re-generate on every override save produces an empty, coordinate-less
+  // map and the editor blanks. With it, the coordinate system + polygon rooms are
+  // carried forward and the manual-override merge below layers edits on top.
+  const baseMpm = sources
+    ? null
+    : await mapPresentationModelRepository.findLatestAutoExtractByFloorId(floorId);
+  const baseData = baseMpm && baseMpm.data ? baseMpm.data : null;
+
   const aggregate = await mapPresentationModelRepository.findMaxVersion(floorId);
   const version = ((aggregate && aggregate._max && aggregate._max.version) || 0) + 1;
 
@@ -134,6 +147,20 @@ async function generate(floorId) {
       usoByCandidateId,
       semanticByUsoId,
     });
+  } else if (baseData && Array.isArray(baseData.rooms) && baseData.rooms.length) {
+    // Option A — seed the generated rooms from the auto-extract base. Keeping the
+    // base rooms (with their original ids) means the manual-override merge below
+    // (replacesRoomId / suppressesRoomIds) resolves exactly as it would over
+    // freshly generated rooms, so edits layer on top instead of a blank map.
+    const baseRooms = baseData.rooms;
+    roomResult = {
+      rooms: baseRooms,
+      stats: {
+        roomCount: baseRooms.length,
+        polygonRooms: baseRooms.filter((r) => r.polygon).length,
+        pointRooms: baseRooms.filter((r) => !r.polygon).length,
+      },
+    };
   } else if (graphData) {
     // No geometry available — pure point fallback from the navigation nodes.
     roomResult = assembleRooms({
@@ -163,13 +190,43 @@ async function generate(floorId) {
   roomResult.stats.manualRooms = manualRooms.length;
   roomResult.stats.roomCount = roomResult.rooms.length;
 
+  // "Remove room" tombstones — drop removed rooms via the shared predicate (exact
+  // id, else best-effort geometry match). Applied on every rebuild so removal
+  // survives re-generate/re-extraction. Labels derive from the filtered set
+  // below, so a removed room's label disappears automatically. Unmatched
+  // tombstones are logged (never silent) and surfaced by the removed-rooms API.
+  let tombstoneMeta = null;
+  const activeTombstones = await roomTombstoneRepository.findActiveByFloorId(floorId);
+  if (activeTombstones.length) {
+    const { ids, unmatched } = suppressedRoomIds(roomResult.rooms, activeTombstones, tombstoneMatchTolerances);
+    if (ids.size) roomResult.rooms = roomResult.rooms.filter((r) => !ids.has(r.id));
+    roomResult.stats.roomCount = roomResult.rooms.length;
+    roomResult.stats.tombstonedRooms = ids.size;
+    tombstoneMeta = {
+      suppressed: ids.size,
+      unmatched: unmatched.map((u) => ({ roomId: u.roomId, reason: u.reason })),
+    };
+    if (unmatched.length) {
+      console.warn(
+        `[room-tombstones] floor ${floorId}: ${unmatched.length} tombstone(s) could not be matched`,
+        tombstoneMeta.unmatched,
+      );
+    }
+  }
+
   // MPM-04: walls, openings, labels (all in the canonical world space).
   const primitivesById = new Map(normalizedGeometry.primitives.map((p) => [p.id, p]));
   const candidateObjects = sources ? sources.geometry.candidateObjects || {} : {};
-  const walls = sources ? extractWalls(primitivesById, candidateObjects.candidateWalls) : [];
+  const walls = sources
+    ? extractWalls(primitivesById, candidateObjects.candidateWalls)
+    : baseData && Array.isArray(baseData.walls)
+      ? baseData.walls
+      : [];
   const openings = sources
     ? extractOpenings(primitivesById, candidateObjects.candidateOpenings, candidateObjects.candidatePassages)
-    : [];
+    : baseData && Array.isArray(baseData.openings)
+      ? baseData.openings
+      : [];
   const labels = extractLabels(roomResult.rooms);
 
   const data = {
@@ -187,23 +244,25 @@ async function generate(floorId) {
       },
       normalization: normalizedGeometry.stats, // primitiveCount + matchedTransforms
       rooms: roomResult.stats, // roomCount + polygonRooms + pointRooms
+      ...(tombstoneMeta ? { tombstones: tombstoneMeta } : {}), // "Remove room" audit of this bake
     },
     // MPM-02: one canonical world coordinate system (ACSM bounds) + geometry
     // primitives transformed into it. Only normalized coordinates are stored.
-    coordinateSystem: normalizedGeometry.coordinateSystem,
+    coordinateSystem:
+      normalizedGeometry.coordinateSystem || (baseData ? baseData.coordinateSystem : null),
     geometry: { primitives: normalizedGeometry.primitives },
     rooms: roomResult.rooms, // MPM-03 — polygons (SEMANTIC) + point fallbacks
     walls, // MPM-04 — normalized polylines
     openings, // MPM-04 — doors/passages as points
     labels, // MPM-04 — room-derived labels (world coords, associated to rooms)
-    graph: graphData, // existing navigation graph output (reference + data), or null
+    graph: graphData || (baseData ? baseData.graph : null), // nav graph output, or carried from base
   };
 
   const record = await mapPresentationModelRepository.create({
     floorId,
     version,
     status: "GENERATED",
-    navigationGraphId: graph ? graph.id : null,
+    navigationGraphId: (graph ? graph.id : null) || (baseMpm ? baseMpm.navigationGraphId : null),
     data,
   });
 
@@ -222,6 +281,15 @@ async function getByFloorId(floorId, { published = false } = {}) {
   const record = published
     ? await mapPresentationModelRepository.findLatestPublishedByFloorId(floorId)
     : await mapPresentationModelRepository.findLatestByFloorId(floorId);
+
+  // Read-time tombstone filter (shared predicate). Kept even when the removal
+  // flag is off so existing tombstones stay respected, and so a tombstone made
+  // AFTER publish hides immediately — not only after the next republish.
+  if (record && record.data) {
+    const tombstones = await roomTombstoneRepository.findActiveByFloorId(floorId);
+    const { data } = filterMpmData(record.data, tombstones, tombstoneMatchTolerances);
+    record.data = data;
+  }
 
   return record ? toModel(record) : null;
 }
@@ -297,20 +365,58 @@ function toManualRoom(o) {
     category: o.category || null,
     name: o.name || null,
     source: "MANUAL",
+    inStoreConnectors: Array.isArray(o.inStoreConnectors) ? o.inStoreConnectors : [],
+    // Part 3D — two-floor shop link. Null unitId = normal single-floor room.
+    unitId: o.unitId || null,
+    linkedRoomIds: Array.isArray(o.linkedRoomIds) ? o.linkedRoomIds : [],
   };
+}
+
+// Part 3D — validate a two-floor-shop link: linkedRoomIds is an array of room id
+// strings (room ids the shop continues into on other floors).
+function isValidLinkedRoomIds(list) {
+  return Array.isArray(list) && list.every((id) => typeof id === "string" && id.length > 0);
+}
+
+// Part 3C — validate the in-store connector list: each { kind, ring }, kind one
+// of stairs/escalator/lift, ring a polygon of >= 3 numeric points.
+function isValidConnectors(list) {
+  if (!Array.isArray(list)) return false;
+  const kinds = new Set(["stairs", "escalator", "lift"]);
+  return list.every(
+    (c) =>
+      c &&
+      kinds.has(c.kind) &&
+      Array.isArray(c.ring) &&
+      c.ring.length >= 3 &&
+      c.ring.every((p) => p && typeof p.x === "number" && typeof p.y === "number") &&
+      // Part 3D — optional per-connector gate for public pass-through routing.
+      (c.publicPassThrough === undefined || typeof c.publicPassThrough === "boolean")
+  );
 }
 
 async function createRoomOverride(floorId, body = {}) {
   await ensureFloorExists(floorId);
-  const { name, category, polygon, area, replacesRoomId, suppressesRoomIds } = body;
+  const { name, category, polygon, area, replacesRoomId, suppressesRoomIds, inStoreConnectors, unitId, linkedRoomIds } = body;
   if (!isValidPolygon(polygon)) {
     throw validationError("polygon must be an array of >= 3 points with numeric x and y");
+  }
+  if (unitId !== undefined && unitId !== null && typeof unitId !== "string") {
+    throw validationError("unitId must be a string or null");
+  }
+  if (linkedRoomIds !== undefined && !isValidLinkedRoomIds(linkedRoomIds)) {
+    throw validationError("linkedRoomIds must be an array of room id strings");
   }
   if (
     suppressesRoomIds !== undefined &&
     (!Array.isArray(suppressesRoomIds) || suppressesRoomIds.some((id) => typeof id !== "string"))
   ) {
     throw validationError("suppressesRoomIds must be an array of room id strings");
+  }
+  if (inStoreConnectors !== undefined && !isValidConnectors(inStoreConnectors)) {
+    throw validationError(
+      "inStoreConnectors must be an array of { kind: stairs|escalator|lift, ring: [>=3 points] }"
+    );
   }
   const override = await mapRoomOverrideRepository.create({
     floorId,
@@ -320,6 +426,9 @@ async function createRoomOverride(floorId, body = {}) {
     area: area != null ? area : polygonArea(polygon),
     replacesRoomId: replacesRoomId || null,
     suppressesRoomIds: suppressesRoomIds || [],
+    inStoreConnectors: inStoreConnectors || [],
+    unitId: unitId || null,
+    linkedRoomIds: linkedRoomIds || [],
   });
   const mpm = await generate(floorId); // apply overrides -> new MPM version
   return { override, mpmVersion: mpm.version };
@@ -342,6 +451,24 @@ async function updateRoomOverride(floorId, overrideId, body = {}) {
   if (body.name !== undefined) data.name = body.name;
   if (body.category !== undefined) data.category = body.category;
   if (body.replacesRoomId !== undefined) data.replacesRoomId = body.replacesRoomId || null;
+  if (body.inStoreConnectors !== undefined) {
+    if (!isValidConnectors(body.inStoreConnectors)) {
+      throw validationError("inStoreConnectors must be an array of { kind, ring }");
+    }
+    data.inStoreConnectors = body.inStoreConnectors;
+  }
+  if (body.unitId !== undefined) {
+    if (body.unitId !== null && typeof body.unitId !== "string") {
+      throw validationError("unitId must be a string or null");
+    }
+    data.unitId = body.unitId || null;
+  }
+  if (body.linkedRoomIds !== undefined) {
+    if (!isValidLinkedRoomIds(body.linkedRoomIds)) {
+      throw validationError("linkedRoomIds must be an array of room id strings");
+    }
+    data.linkedRoomIds = body.linkedRoomIds;
+  }
   if (Object.keys(data).length === 0) throw validationError("No updatable fields provided");
 
   const override = await mapRoomOverrideRepository.update(overrideId, data);
@@ -365,6 +492,79 @@ async function listRoomOverrides(floorId) {
   return mapRoomOverrideRepository.findAllByFloorId(floorId);
 }
 
+// --- "Remove room" (soft-delete tombstone + undo) ---
+
+// Soft-delete one room. Idempotent: a second call while already removed returns
+// the existing tombstone. Snapshots the room (audit + restore display) and its
+// geometry fingerprint, then regenerates so the draft reflects the removal.
+// Single-room by design; a bulk caller can loop over this.
+async function removeRoom(floorId, roomId, { reason = null, actor = SYSTEM_ACTOR } = {}) {
+  await ensureFloorExists(floorId);
+  const already = await roomTombstoneRepository.findActiveByFloorAndRoom(floorId, roomId);
+  if (already) return { tombstone: already, alreadyRemoved: true };
+
+  const latest = await mapPresentationModelRepository.findLatestByFloorId(floorId);
+  const rooms = (latest && latest.data && Array.isArray(latest.data.rooms) && latest.data.rooms) || [];
+  const room = rooms.find((r) => r.id === roomId);
+  if (!room) throw validationError("Room not found in the current map model");
+
+  const c = roomCentroid(room);
+  const tombstone = await roomTombstoneRepository.create({
+    floorId,
+    roomId,
+    roomKind: roomId.startsWith("room-manual-") ? "MANUAL" : "AUTO",
+    centroidX: c ? c.x : null,
+    centroidY: c ? c.y : null,
+    area: roomArea(room),
+    roomSnapshot: room,
+    reason,
+    deletedBy: actor,
+  });
+  const mpm = await generate(floorId);
+  return { tombstone, mpmVersion: mpm.version };
+}
+
+// Undo a removal. Idempotent: returns { restored:false, reason:"not_removed" }
+// if the room was not actively removed. After clearing the tombstone it
+// regenerates; if the source room no longer exists (e.g. re-extracted away) the
+// result says so explicitly rather than silently succeeding.
+async function restoreRoom(floorId, roomId, { actor = SYSTEM_ACTOR } = {}) {
+  await ensureFloorExists(floorId);
+  const active = await roomTombstoneRepository.findActiveByFloorAndRoom(floorId, roomId);
+  if (!active) return { restored: false, reason: "not_removed" };
+
+  await roomTombstoneRepository.restore(active.id, actor, new Date());
+  const mpm = await generate(floorId);
+  const rooms = (mpm && mpm.data && mpm.data.rooms) || [];
+  const back = matchTombstone(active, rooms, tombstoneMatchTolerances).status === "matched";
+  return back
+    ? { restored: true, mpmVersion: mpm.version }
+    : { restored: false, reason: "source_room_no_longer_exists", mpmVersion: mpm.version };
+}
+
+// The removed-rooms list for the admin "undo" drawer. `unmatched` surfaces
+// tombstones the last bake could not resolve (re-extraction renumber /
+// ambiguous), so a removal never fails silently.
+async function listRemovedRooms(floorId) {
+  await ensureFloorExists(floorId);
+  const tombstones = await roomTombstoneRepository.findActiveByFloorId(floorId);
+  const latest = await mapPresentationModelRepository.findLatestByFloorId(floorId);
+  const unmatched = (latest && latest.data && latest.data.metadata && latest.data.metadata.tombstones
+    && latest.data.metadata.tombstones.unmatched) || [];
+  const unmatchedById = new Map(unmatched.map((u) => [u.roomId, u.reason]));
+  return tombstones.map((t) => ({
+    id: t.id,
+    roomId: t.roomId,
+    roomKind: t.roomKind,
+    name: (t.roomSnapshot && t.roomSnapshot.name) || null,
+    reason: t.reason,
+    deletedBy: t.deletedBy,
+    deletedAt: t.deletedAt,
+    unmatched: unmatchedById.has(t.roomId),
+    matchReason: unmatchedById.get(t.roomId) || null,
+  }));
+}
+
 module.exports = {
   generate,
   getByFloorId,
@@ -373,4 +573,7 @@ module.exports = {
   updateRoomOverride,
   deleteRoomOverride,
   listRoomOverrides,
+  removeRoom,
+  restoreRoom,
+  listRemovedRooms,
 };

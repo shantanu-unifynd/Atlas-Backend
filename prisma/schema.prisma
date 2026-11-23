@@ -63,6 +63,7 @@ model Floor {
   navigationNodes  NavigationNode[]
   mapPresentationModels MapPresentationModel[]
   mapRoomOverrides MapRoomOverride[]
+  roomTombstones   RoomTombstone[]
 
   @@unique([buildingId, level])
   @@index([buildingId])
@@ -109,6 +110,16 @@ model MapRoomOverride {
   // replacesRoomId (a merged room replaces one source room and suppresses the
   // other). JSON array of room ids.
   suppressesRoomIds Json @default("[]") @map("suppresses_room_ids")
+  // Part 3C — in-store vertical connectors cut into this room (stairs / escalator
+  // / lift openings). JSON array of { kind, ring: [{x,y}...] }; the ring is an
+  // inner hole, the kind drives the visitor glyph + (later) cross-floor routing.
+  inStoreConnectors Json @default("[]") @map("in_store_connectors")
+  // Part 3D — two-floor shops. A shop that spans floors shares one unitId across
+  // its per-floor rooms; linkedRoomIds lists the partner room ids on other floors.
+  // Null unitId = a normal single-floor room. The vertical link for routing is the
+  // inStoreConnector whose publicPassThrough flag gates public pass-through.
+  unitId        String? @map("unit_id")
+  linkedRoomIds Json    @default("[]") @map("linked_room_ids")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -117,6 +128,36 @@ model MapRoomOverride {
 
   @@index([floorId])
   @@map("map_room_overrides")
+}
+
+// "Remove room" tombstone (soft delete). A room lives only inside the MPM JSON,
+// so removal is recorded here and applied by the generate step + read filters
+// (one shared predicate). AUTO ids are stable across re-generate but renumber on
+// re-extraction, so we also keep a geometry fingerprint (centroid + area) for a
+// best-effort re-match. restoredAt IS NULL = active. roomSnapshot is the audit
+// record + powers the "removed rooms" list.
+model RoomTombstone {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  floorId     String  @map("floor_id") @db.Uuid
+  roomId      String  @map("room_id")
+  roomKind    String  @map("room_kind") // AUTO | MANUAL
+  centroidX   Float?  @map("centroid_x")
+  centroidY   Float?  @map("centroid_y")
+  area        Float?
+  roomSnapshot Json   @map("room_snapshot")
+  reason      String?
+  deletedBy   String  @map("deleted_by")
+  deletedAt   DateTime @default(now()) @map("deleted_at")
+  restoredBy  String?  @map("restored_by")
+  restoredAt  DateTime? @map("restored_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  floor Floor @relation(fields: [floorId], references: [id], onDelete: Cascade)
+
+  @@index([floorId])
+  @@map("room_tombstones")
 }
 
 model Asset {
